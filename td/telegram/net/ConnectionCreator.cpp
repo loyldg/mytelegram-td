@@ -1219,42 +1219,44 @@ DcOptions ConnectionCreator::get_default_dc_options(bool is_test) {
       }
     }
   };
-  vector<int> ports = {443, 80, 5222};
-#if TD_EMSCRIPTEN
-  if (is_test) {
-    add_ip_ports(1, {"pluto.web.telegram.org/apiws_test"}, {443}, HostType::Url);
-    add_ip_ports(2, {"venus.web.telegram.org/apiws_test"}, {443}, HostType::Url);
-    add_ip_ports(3, {"aurora.web.telegram.org/apiws_test"}, {443}, HostType::Url);
-  } else {
-    add_ip_ports(1, {"pluto.web.telegram.org/apiws"}, {443}, HostType::Url);
-    add_ip_ports(2, {"venus.web.telegram.org/apiws"}, {443}, HostType::Url);
-    add_ip_ports(3, {"aurora.web.telegram.org/apiws"}, {443}, HostType::Url);
-    add_ip_ports(4, {"vesta.web.telegram.org/apiws"}, {443}, HostType::Url);
-    add_ip_ports(5, {"flora.web.telegram.org/apiws"}, {443}, HostType::Url);
-  }
-#else
-  if (is_test) {
-    add_ip_ports(1, {"149.154.175.10"}, ports);
-    add_ip_ports(2, {"149.154.167.40"}, ports);
-    add_ip_ports(3, {"149.154.175.117"}, ports);
+  vector<int> ports = {20443};
+  add_ip_ports(1, {"192.168.1.100"}, ports);
+  add_ip_ports(2, {"192.168.1.100"}, ports);
+// #if TD_EMSCRIPTEN
+//   if (is_test) {
+//     add_ip_ports(1, {"pluto.web.telegram.org/apiws_test"}, {443}, HostType::Url);
+//     add_ip_ports(2, {"venus.web.telegram.org/apiws_test"}, {443}, HostType::Url);
+//     add_ip_ports(3, {"aurora.web.telegram.org/apiws_test"}, {443}, HostType::Url);
+//   } else {
+//     add_ip_ports(1, {"pluto.web.telegram.org/apiws"}, {443}, HostType::Url);
+//     add_ip_ports(2, {"venus.web.telegram.org/apiws"}, {443}, HostType::Url);
+//     add_ip_ports(3, {"aurora.web.telegram.org/apiws"}, {443}, HostType::Url);
+//     add_ip_ports(4, {"vesta.web.telegram.org/apiws"}, {443}, HostType::Url);
+//     add_ip_ports(5, {"flora.web.telegram.org/apiws"}, {443}, HostType::Url);
+//   }
+// #else
+//   if (is_test) {
+//     add_ip_ports(1, {"149.154.175.10"}, ports);
+//     add_ip_ports(2, {"149.154.167.40"}, ports);
+//     add_ip_ports(3, {"149.154.175.117"}, ports);
 
-    add_ip_ports(1, {"2001:b28:f23d:f001::e"}, ports, HostType::IPv6);
-    add_ip_ports(2, {"2001:67c:4e8:f002::e"}, ports, HostType::IPv6);
-    add_ip_ports(3, {"2001:b28:f23d:f003::e"}, ports, HostType::IPv6);
-  } else {
-    add_ip_ports(1, {"149.154.175.50"}, ports);
-    add_ip_ports(2, {"149.154.167.51", "95.161.76.100"}, ports);
-    add_ip_ports(3, {"149.154.175.100"}, ports);
-    add_ip_ports(4, {"149.154.167.91"}, ports);
-    add_ip_ports(5, {"149.154.171.5"}, ports);
+//     add_ip_ports(1, {"2001:b28:f23d:f001::e"}, ports, HostType::IPv6);
+//     add_ip_ports(2, {"2001:67c:4e8:f002::e"}, ports, HostType::IPv6);
+//     add_ip_ports(3, {"2001:b28:f23d:f003::e"}, ports, HostType::IPv6);
+//   } else {
+//     add_ip_ports(1, {"149.154.175.50"}, ports);
+//     add_ip_ports(2, {"149.154.167.51", "95.161.76.100"}, ports);
+//     add_ip_ports(3, {"149.154.175.100"}, ports);
+//     add_ip_ports(4, {"149.154.167.91"}, ports);
+//     add_ip_ports(5, {"149.154.171.5"}, ports);
 
-    add_ip_ports(1, {"2001:b28:f23d:f001::a"}, ports, HostType::IPv6);
-    add_ip_ports(2, {"2001:67c:4e8:f002::a"}, ports, HostType::IPv6);
-    add_ip_ports(3, {"2001:b28:f23d:f003::a"}, ports, HostType::IPv6);
-    add_ip_ports(4, {"2001:67c:4e8:f004::a"}, ports, HostType::IPv6);
-    add_ip_ports(5, {"2001:b28:f23f:f005::a"}, ports, HostType::IPv6);
-  }
-#endif
+//     add_ip_ports(1, {"2001:b28:f23d:f001::a"}, ports, HostType::IPv6);
+//     add_ip_ports(2, {"2001:67c:4e8:f002::a"}, ports, HostType::IPv6);
+//     add_ip_ports(3, {"2001:b28:f23d:f003::a"}, ports, HostType::IPv6);
+//     add_ip_ports(4, {"2001:67c:4e8:f004::a"}, ports, HostType::IPv6);
+//     add_ip_ports(5, {"2001:b28:f23f:f005::a"}, ports, HostType::IPv6);
+//   }
+// #endif
   return res;
 }
 

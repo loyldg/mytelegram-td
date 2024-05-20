@@ -157,13 +157,12 @@ Result<int32> HttpDate::parse_http_date(string slice) {
 Result<SimpleConfig> decode_config(Slice input) {
   static auto rsa = mtproto::RSA::from_pem_public_key(
                         "-----BEGIN RSA PUBLIC KEY-----\n"
-                        "MIIBCgKCAQEAyr+18Rex2ohtVy8sroGP\n"
-                        "BwXD3DOoKCSpjDqYoXgCqB7ioln4eDCFfOBUlfXUEvM/fnKCpF46VkAftlb4VuPD\n"
-                        "eQSS/ZxZYEGqHaywlroVnXHIjgqoxiAd192xRGreuXIaUKmkwlM9JID9WS2jUsTp\n"
-                        "zQ91L8MEPLJ/4zrBwZua8W5fECwCCh2c9G5IzzBm+otMS/YKwmR1olzRCyEkyAEj\n"
-                        "XWqBI9Ftv5eG8m0VkBzOG655WIYdyV0HfDK/NWcvGqa0w/nriMD6mDjKOryamw0O\n"
-                        "P9QuYgMN0C9xMW9y8SmP4h92OAWodTYgY1hZCxdv6cs5UnW9+PWvS+WIbkh+GaWY\n"
-                        "xwIDAQAB\n"
+                        "MIIBCgKCAQEAu+3tvscWDAlEvVylTeMr5FpU2AjgqzoQHPjzp69r0YAtq0a8rX0M\n"
+                        "Ue78F/FRAqBaEbZW6WBzF3AjOlNYpOtvvwGhl9rGCgziunbd9nwcKJBMDWS9O7Mz\n"
+                        "/8xjz/swIB4V56XcjOhrjUHJ/GniFKoum00xeEcYnr5xnLesvpVMq97Ga6b+xt3H\n"
+                        "RftHY/Zy1dG5zs8upuiAOlEiKilhu1IthfMjFG3NF6TiGrO9YU3YixFbJy67jtHk\n"
+                        "v5FarscM2fC5iWQ2eP1y6jXR64sGU3QjncvozYOePrH9jGcnmzUmj42x/H28IjJQ\n"
+                        "9EjEc22sPOuauK0IF2QiCGh+TfsKCK189wIDAQAB\n"
                         "-----END RSA PUBLIC KEY-----\n")
                         .move_as_ok();
 
@@ -1509,8 +1508,6 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
   int32 transcribe_audio_trial_cooldown_until = 0;
   vector<string> business_features;
   string premium_manage_subscription_url;
-  bool need_premium_for_new_chat_privacy = true;
-  bool channel_revenue_withdrawal_enabled = false;
   if (config->get_id() == telegram_api::jsonObject::ID) {
     for (auto &key_value : static_cast<telegram_api::jsonObject *>(config.get())->value_) {
       Slice key = key_value->key_;
@@ -2042,11 +2039,12 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
         continue;
       }
       if (key == "new_noncontact_peers_require_premium_without_ownpremium") {
-        need_premium_for_new_chat_privacy = !get_json_value_bool(std::move(key_value->value_), key);
+        G()->set_option_boolean("need_premium_for_new_chat_privacy",
+                                !get_json_value_bool(std::move(key_value->value_), key));
         continue;
       }
       if (key == "channel_revenue_withdrawal_enabled") {
-        channel_revenue_withdrawal_enabled = get_json_value_bool(std::move(key_value->value_), key);
+        G()->set_option_boolean("can_withdraw_chat_revenue", get_json_value_bool(std::move(key_value->value_), key));
         continue;
       }
       if (key == "upload_premium_speedup_download") {
@@ -2231,9 +2229,6 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
 
   options.set_option_integer("stickers_premium_by_emoji_num", stickers_premium_by_emoji_num);
   options.set_option_integer("stickers_normal_by_emoji_per_premium_num", stickers_normal_by_emoji_per_premium_num);
-
-  options.set_option_boolean("can_withdraw_chat_revenue", channel_revenue_withdrawal_enabled);
-  options.set_option_boolean("need_premium_for_new_chat_privacy", need_premium_for_new_chat_privacy);
 
   options.set_option_empty("default_ton_blockchain_config");
   options.set_option_empty("default_ton_blockchain_name");
