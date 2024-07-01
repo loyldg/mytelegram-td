@@ -20,6 +20,7 @@
 #include "td/telegram/MessageId.h"
 #include "td/telegram/MessageSelfDestructType.h"
 #include "td/telegram/Photo.h"
+#include "td/telegram/QuickReplyMessageFullId.h"
 #include "td/telegram/ReplyMarkup.h"
 #include "td/telegram/secret_api.h"
 #include "td/telegram/SecretInputMedia.h"
@@ -110,8 +111,15 @@ unique_ptr<MessageContent> create_screenshot_taken_message_content();
 
 unique_ptr<MessageContent> create_chat_set_ttl_message_content(int32 ttl, UserId from_user_id);
 
+td_api::object_ptr<td_api::formattedText> extract_input_caption(
+    td_api::object_ptr<td_api::InputMessageContent> &input_message_content);
+
+bool extract_input_invert_media(const td_api::object_ptr<td_api::InputMessageContent> &input_message_content);
+
 Result<InputMessageContent> get_input_message_content(
     DialogId dialog_id, tl_object_ptr<td_api::InputMessageContent> &&input_message_content, Td *td, bool is_premium);
+
+Status check_message_group_message_contents(const vector<InputMessageContent> &message_contents);
 
 bool can_have_input_media(const Td *td, const MessageContent *content, bool is_server);
 
@@ -210,6 +218,12 @@ void register_reply_message_content(Td *td, const MessageContent *content);
 
 void unregister_reply_message_content(Td *td, const MessageContent *content);
 
+void register_quick_reply_message_content(Td *td, const MessageContent *content,
+                                          QuickReplyMessageFullId message_full_id, const char *source);
+
+void unregister_quick_reply_message_content(Td *td, const MessageContent *content,
+                                            QuickReplyMessageFullId message_full_id, const char *source);
+
 unique_ptr<MessageContent> get_secret_message_content(
     Td *td, string message_text, unique_ptr<EncryptedFile> file,
     tl_object_ptr<secret_api::DecryptedMessageMedia> &&media_ptr,
@@ -235,7 +249,8 @@ unique_ptr<MessageContent> dup_message_content(Td *td, DialogId dialog_id, const
 
 unique_ptr<MessageContent> get_action_message_content(Td *td, tl_object_ptr<telegram_api::MessageAction> &&action_ptr,
                                                       DialogId owner_dialog_id, int32 message_date,
-                                                      const RepliedMessageInfo &replied_message_info);
+                                                      const RepliedMessageInfo &replied_message_info,
+                                                      bool is_business_message);
 
 tl_object_ptr<td_api::MessageContent> get_message_content_object(const MessageContent *content, Td *td,
                                                                  DialogId dialog_id, int32 message_date,

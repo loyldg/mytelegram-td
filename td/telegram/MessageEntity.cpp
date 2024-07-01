@@ -57,7 +57,8 @@ int MessageEntity::get_type_priority(Type type) {
                                    50 /*BankCardNumber*/,
                                    50 /*MediaTimestamp*/,
                                    94 /*Spoiler*/,
-                                   99 /*CustomEmoji*/};
+                                   99 /*CustomEmoji*/,
+                                   0 /*ExpandableBlockQuote*/};
   static_assert(sizeof(priorities) / sizeof(priorities[0]) == static_cast<size_t>(MessageEntity::Type::Size), "");
   return priorities[static_cast<int32>(type)];
 }
@@ -106,6 +107,8 @@ StringBuilder &operator<<(StringBuilder &string_builder, const MessageEntity::Ty
       return string_builder << "Spoiler";
     case MessageEntity::Type::CustomEmoji:
       return string_builder << "CustomEmoji";
+    case MessageEntity::Type::ExpandableBlockQuote:
+      return string_builder << "ExpandableBlockQuote";
     default:
       UNREACHABLE();
       return string_builder << "Impossible";
@@ -176,6 +179,8 @@ tl_object_ptr<td_api::TextEntityType> MessageEntity::get_text_entity_type_object
       return make_tl_object<td_api::textEntityTypeSpoiler>();
     case MessageEntity::Type::CustomEmoji:
       return make_tl_object<td_api::textEntityTypeCustomEmoji>(custom_emoji_id.get());
+    case MessageEntity::Type::ExpandableBlockQuote:
+      return make_tl_object<td_api::textEntityTypeExpandableBlockQuote>();
     default:
       UNREACHABLE();
       return nullptr;
@@ -1081,15 +1086,15 @@ static bool is_common_tld(Slice str) {
        "mitsubishi", "mk", "ml", "mlb", "mls", "mm", "mma", "mn", "mo", "mobi", "mobile", "moda", "moe", "moi", "mom",
        "monash", "money", "monster", "mormon", "mortgage", "moscow", "moto", "motorcycles", "mov", "movie", "mp", "mq",
        "mr", "ms", "msd", "mt", "mtn", "mtr", "mu", "museum", "music", "mv", "mw", "mx", "my", "mz", "na", "nab",
-       "nagoya", "name", "natura", "navy", "nba", "nc", "ne", "nec", "net", "netbank", "netflix", "network", "neustar",
-       "new", "news", "next", "nextdirect", "nexus", "nf", "nfl", "ng", "ngo", "nhk", "ni", "nico", "nike", "nikon",
-       "ninja", "nissan", "nissay", "nl", "no", "nokia", "norton", "now", "nowruz", "nowtv", "np", "nr", "nra", "nrw",
-       "ntt", "nu", "nyc", "nz", "obi", "observer", "office", "okinawa", "olayan", "olayangroup", "ollo", "om", "omega",
-       "one", "ong", "onl", "online", "ooo", "open", "oracle", "orange", "org", "organic", "origins", "osaka", "otsuka",
-       "ott", "ovh", "pa", "page", "panasonic", "paris", "pars", "partners", "parts", "party", "pay", "pccw", "pe",
-       "pet", "pf", "pfizer", "pg", "ph", "pharmacy", "phd", "philips", "phone", "photo", "photography", "photos",
-       "physio", "pics", "pictet", "pictures", "pid", "pin", "ping", "pink", "pioneer", "pizza", "pk", "pl", "place",
-       "play", "playstation", "plumbing", "plus", "pm", "pn", "pnc", "pohl", "poker", "politie", "porn", "post", "pr",
+       "nagoya", "name", "navy", "nba", "nc", "ne", "nec", "net", "netbank", "netflix", "network", "neustar", "new",
+       "news", "next", "nextdirect", "nexus", "nf", "nfl", "ng", "ngo", "nhk", "ni", "nico", "nike", "nikon", "ninja",
+       "nissan", "nissay", "nl", "no", "nokia", "norton", "now", "nowruz", "nowtv", "np", "nr", "nra", "nrw", "ntt",
+       "nu", "nyc", "nz", "obi", "observer", "office", "okinawa", "olayan", "olayangroup", "ollo", "om", "omega", "one",
+       "ong", "onl", "online", "ooo", "open", "oracle", "orange", "org", "organic", "origins", "osaka", "otsuka", "ott",
+       "ovh", "pa", "page", "panasonic", "paris", "pars", "partners", "parts", "party", "pay", "pccw", "pe", "pet",
+       "pf", "pfizer", "pg", "ph", "pharmacy", "phd", "philips", "phone", "photo", "photography", "photos", "physio",
+       "pics", "pictet", "pictures", "pid", "pin", "ping", "pink", "pioneer", "pizza", "pk", "pl", "place", "play",
+       "playstation", "plumbing", "plus", "pm", "pn", "pnc", "pohl", "poker", "politie", "porn", "post", "pr",
        "pramerica", "praxi", "press", "prime", "pro", "prod", "productions", "prof", "progressive", "promo",
        "properties", "property", "protection", "pru", "prudential", "ps", "pt", "pub", "pw", "pwc", "py", "qa", "qpon",
        "quebec", "quest", "racing", "radio", "re", "read", "realestate", "realtor", "realty", "recipes", "red",
@@ -1449,7 +1454,8 @@ static constexpr int32 get_splittable_entities_mask() {
 }
 
 static constexpr int32 get_blockquote_entities_mask() {
-  return get_entity_type_mask(MessageEntity::Type::BlockQuote);
+  return get_entity_type_mask(MessageEntity::Type::BlockQuote) |
+         get_entity_type_mask(MessageEntity::Type::ExpandableBlockQuote);
 }
 
 static constexpr int32 get_continuous_entities_mask() {
@@ -1479,7 +1485,7 @@ static int32 is_splittable_entity(MessageEntity::Type type) {
 }
 
 static int32 is_blockquote_entity(MessageEntity::Type type) {
-  return type == MessageEntity::Type::BlockQuote;
+  return (get_entity_type_mask(type) & get_blockquote_entities_mask()) != 0;
 }
 
 static int32 is_continuous_entity(MessageEntity::Type type) {
@@ -1551,6 +1557,10 @@ static bool are_entities_valid(const vector<MessageEntity> &entities) {
         // continuous and blockquote can't be part of other continuous entity
         return false;
       }
+      if (is_blockquote_entity(entity.type) && (nested_entity_type_mask & get_blockquote_entities_mask()) != 0) {
+        // blockquote entities can't be nested
+        return false;
+      }
       if ((nested_entity_type_mask & get_splittable_entities_mask()) != 0) {
         // the previous nested entity may be needed to split for consistency
         // alternatively, better entity merging needs to be implemented
@@ -1604,7 +1614,7 @@ static void remove_entities_intersecting_blockquote(vector<MessageEntity> &entit
   size_t left_entities = 0;
   for (size_t i = 0; i < entities.size(); i++) {
     while (blockquote_it != blockquote_entities.end() &&
-           (blockquote_it->type != MessageEntity::Type::BlockQuote ||
+           (!is_blockquote_entity(blockquote_it->type) ||
             blockquote_it->offset + blockquote_it->length <= entities[i].offset)) {
       ++blockquote_it;
     }
@@ -1819,6 +1829,8 @@ Slice get_first_url(const FormattedText &text) {
       case MessageEntity::Type::Spoiler:
         break;
       case MessageEntity::Type::CustomEmoji:
+        break;
+      case MessageEntity::Type::ExpandableBlockQuote:
         break;
       default:
         UNREACHABLE();
@@ -2163,8 +2175,21 @@ Result<vector<MessageEntity>> parse_markdown_v2(string &text) {
       // end of an entity
       auto type = nested_entities.back().type;
       if (c == '\n' && type != MessageEntity::Type::BlockQuote) {
-        return Status::Error(400, PSLICE() << "Can't find end of " << nested_entities.back().type
-                                           << " entity at byte offset " << nested_entities.back().entity_byte_offset);
+        if (type != MessageEntity::Type::Spoiler || !(nested_entities.back().entity_byte_offset == i - 2 ||
+                                                      (nested_entities.back().entity_byte_offset == i - 3 &&
+                                                       result_size != 0 && text[result_size - 1] == '\r'))) {
+          return Status::Error(400, PSLICE() << "Can't find end of " << nested_entities.back().type
+                                             << " entity at byte offset " << nested_entities.back().entity_byte_offset);
+        }
+        nested_entities.pop_back();
+        CHECK(!nested_entities.empty());
+        type = nested_entities.back().type;
+        if (type != MessageEntity::Type::BlockQuote) {
+          CHECK(type != MessageEntity::Type::Spoiler);
+          return Status::Error(400, PSLICE() << "Can't find end of " << nested_entities.back().type
+                                             << " entity at byte offset " << nested_entities.back().entity_byte_offset);
+        }
+        type = MessageEntity::Type::ExpandableBlockQuote;
       }
       auto argument = std::move(nested_entities.back().argument);
       UserId user_id;
@@ -2239,6 +2264,7 @@ Result<vector<MessageEntity>> parse_markdown_v2(string &text) {
           break;
         }
         case MessageEntity::Type::BlockQuote:
+        case MessageEntity::Type::ExpandableBlockQuote:
           CHECK(have_blockquote);
           have_blockquote = false;
           text[result_size++] = text[i];
@@ -2267,12 +2293,19 @@ Result<vector<MessageEntity>> parse_markdown_v2(string &text) {
   }
   if (have_blockquote) {
     CHECK(!nested_entities.empty());
+    auto type = MessageEntity::Type::BlockQuote;
+    if (nested_entities.back().type == MessageEntity::Type::Spoiler &&
+        nested_entities.back().entity_byte_offset == text.size() - 2) {
+      nested_entities.pop_back();
+      CHECK(!nested_entities.empty());
+      type = MessageEntity::Type::ExpandableBlockQuote;
+    }
     if (nested_entities.back().type == MessageEntity::Type::BlockQuote) {
       have_blockquote = false;
       auto entity_offset = nested_entities.back().entity_offset;
       auto entity_length = utf16_offset - entity_offset;
       if (entity_length != 0) {
-        entities.emplace_back(MessageEntity::Type::BlockQuote, entity_offset, entity_length);
+        entities.emplace_back(type, entity_offset, entity_length);
       }
       nested_entities.pop_back();
     }
@@ -3253,7 +3286,8 @@ Result<vector<MessageEntity>> parse_html(string &str) {
           break;
         }
         auto attribute_begin_pos = i;
-        while (!is_space(text[i]) && text[i] != '=') {
+        while (!is_space(text[i]) && text[i] != '=' && text[i] != '>' && text[i] != '/' && text[i] != '"' &&
+               text[i] != '\'') {
           i++;
         }
         Slice attribute_name(text + attribute_begin_pos, i - attribute_begin_pos);
@@ -3265,8 +3299,14 @@ Result<vector<MessageEntity>> parse_html(string &str) {
           i++;
         }
         if (text[i] != '=') {
-          return Status::Error(400, PSLICE() << "Expected equal sign in declaration of an attribute of the tag \""
-                                             << tag_name << "\" at byte offset " << begin_pos);
+          if (text[i] == 0) {
+            return Status::Error(400, PSLICE()
+                                          << "Unclosed start tag \"" << tag_name << "\" at byte offset " << begin_pos);
+          }
+          if (tag_name == "blockquote" && attribute_name == Slice("expandable")) {
+            argument = "1";
+          }
+          continue;
         }
         i++;
         while (text[i] != 0 && is_space(text[i])) {
@@ -3323,6 +3363,8 @@ Result<vector<MessageEntity>> parse_html(string &str) {
           argument = attribute_value.substr(3);
         } else if (tag_name == "tg-emoji" && attribute_name == Slice("emoji-id")) {
           argument = std::move(attribute_value);
+        } else if (tag_name == "blockquote" && attribute_name == Slice("expandable")) {
+          argument = "1";
         }
       }
 
@@ -3408,7 +3450,11 @@ Result<vector<MessageEntity>> parse_html(string &str) {
                                   nested_entities.back().argument);
           }
         } else if (tag_name == "blockquote") {
-          entities.emplace_back(MessageEntity::Type::BlockQuote, entity_offset, entity_length);
+          if (!nested_entities.back().argument.empty()) {
+            entities.emplace_back(MessageEntity::Type::ExpandableBlockQuote, entity_offset, entity_length);
+          } else {
+            entities.emplace_back(MessageEntity::Type::BlockQuote, entity_offset, entity_length);
+          }
         } else {
           UNREACHABLE();
         }
@@ -3418,7 +3464,7 @@ Result<vector<MessageEntity>> parse_html(string &str) {
   }
   if (!nested_entities.empty()) {
     return Status::Error(
-        400, PSLICE() << "Can't find end tag corresponding to start tag " << nested_entities.back().tag_name);
+        400, PSLICE() << "Can't find end tag corresponding to start tag \"" << nested_entities.back().tag_name << '"');
   }
 
   for (auto &entity : entities) {
@@ -3481,7 +3527,7 @@ vector<tl_object_ptr<secret_api::MessageEntity>> get_input_secret_message_entiti
         break;
       case MessageEntity::Type::BlockQuote:
         if (layer >= static_cast<int32>(SecretChatLayer::NewEntities)) {
-          // result.push_back(make_tl_object<secret_api::messageEntityBlockquote>(entity.offset, entity.length));
+          // result.push_back(make_tl_object<secret_api::messageEntityBlockquote>(0, false /*ignored*/, entity.offset, entity.length));
         }
         break;
       case MessageEntity::Type::Code:
@@ -3510,6 +3556,12 @@ vector<tl_object_ptr<secret_api::MessageEntity>> get_input_secret_message_entiti
         if (layer >= static_cast<int32>(SecretChatLayer::SpoilerAndCustomEmojiEntities)) {
           result.push_back(make_tl_object<secret_api::messageEntityCustomEmoji>(entity.offset, entity.length,
                                                                                 entity.custom_emoji_id.get()));
+        }
+        break;
+      case MessageEntity::Type::ExpandableBlockQuote:
+        if (layer >= static_cast<int32>(SecretChatLayer::NewEntities)) {
+          // result.push_back(make_tl_object<secret_api::messageEntityBlockquote>(
+          //     secret_api::messageEntityBlockquote::COLLAPSED_MASK, false /*ignored*/, entity.offset, entity.length));
         }
         break;
       default:
@@ -3635,6 +3687,9 @@ Result<vector<MessageEntity>> get_message_entities(const UserManager *user_manag
         entities.emplace_back(MessageEntity::Type::CustomEmoji, offset, length, custom_emoji_id);
         break;
       }
+      case td_api::textEntityTypeExpandableBlockQuote::ID:
+        entities.emplace_back(MessageEntity::Type::ExpandableBlockQuote, offset, length);
+        break;
       default:
         UNREACHABLE();
     }
@@ -3722,7 +3777,8 @@ vector<MessageEntity> get_message_entities(const UserManager *user_manager,
       }
       case telegram_api::messageEntityBlockquote::ID: {
         auto entity = static_cast<const telegram_api::messageEntityBlockquote *>(server_entity.get());
-        entities.emplace_back(MessageEntity::Type::BlockQuote, entity->offset_, entity->length_);
+        auto type = entity->collapsed_ ? MessageEntity::Type::ExpandableBlockQuote : MessageEntity::Type::BlockQuote;
+        entities.emplace_back(type, entity->offset_, entity->length_);
         break;
       }
       case telegram_api::messageEntityCode::ID: {
@@ -4472,38 +4528,6 @@ void truncate_formatted_text(FormattedText &text, size_t length) {
   remove_empty_entities(text.entities);
 }
 
-td_api::object_ptr<td_api::formattedText> extract_input_caption(
-    tl_object_ptr<td_api::InputMessageContent> &input_message_content) {
-  switch (input_message_content->get_id()) {
-    case td_api::inputMessageAnimation::ID: {
-      auto input_animation = static_cast<td_api::inputMessageAnimation *>(input_message_content.get());
-      return std::move(input_animation->caption_);
-    }
-    case td_api::inputMessageAudio::ID: {
-      auto input_audio = static_cast<td_api::inputMessageAudio *>(input_message_content.get());
-      return std::move(input_audio->caption_);
-    }
-    case td_api::inputMessageDocument::ID: {
-      auto input_document = static_cast<td_api::inputMessageDocument *>(input_message_content.get());
-      return std::move(input_document->caption_);
-    }
-    case td_api::inputMessagePhoto::ID: {
-      auto input_photo = static_cast<td_api::inputMessagePhoto *>(input_message_content.get());
-      return std::move(input_photo->caption_);
-    }
-    case td_api::inputMessageVideo::ID: {
-      auto input_video = static_cast<td_api::inputMessageVideo *>(input_message_content.get());
-      return std::move(input_video->caption_);
-    }
-    case td_api::inputMessageVoiceNote::ID: {
-      auto input_voice_note = static_cast<td_api::inputMessageVoiceNote *>(input_message_content.get());
-      return std::move(input_voice_note->caption_);
-    }
-    default:
-      return nullptr;
-  }
-}
-
 Result<FormattedText> get_formatted_text(const Td *td, DialogId dialog_id,
                                          td_api::object_ptr<td_api::formattedText> &&text, bool is_bot,
                                          bool allow_empty, bool skip_media_timestamps, bool skip_trim,
@@ -4622,7 +4646,8 @@ vector<tl_object_ptr<telegram_api::MessageEntity>> get_input_message_entities(co
     user_entity_count++;
     switch (entity.type) {
       case MessageEntity::Type::BlockQuote:
-        result.push_back(make_tl_object<telegram_api::messageEntityBlockquote>(entity.offset, entity.length));
+        result.push_back(
+            make_tl_object<telegram_api::messageEntityBlockquote>(0, false /*ignored*/, entity.offset, entity.length));
         break;
       case MessageEntity::Type::Code:
         result.push_back(make_tl_object<telegram_api::messageEntityCode>(entity.offset, entity.length));
@@ -4644,6 +4669,10 @@ vector<tl_object_ptr<telegram_api::MessageEntity>> get_input_message_entities(co
                                                                                      std::move(input_user)));
         break;
       }
+      case MessageEntity::Type::ExpandableBlockQuote:
+        result.push_back(make_tl_object<telegram_api::messageEntityBlockquote>(
+            telegram_api::messageEntityBlockquote::COLLAPSED_MASK, false /*ignored*/, entity.offset, entity.length));
+        break;
       default:
         UNREACHABLE();
     }
@@ -4705,7 +4734,8 @@ void remove_unallowed_entities(const Td *td, FormattedText &text, DialogId dialo
     td::remove_if(text.entities, [layer](const MessageEntity &entity) {
       if (layer < static_cast<int32>(SecretChatLayer::NewEntities) &&
           (entity.type == MessageEntity::Type::Underline || entity.type == MessageEntity::Type::Strikethrough ||
-           entity.type == MessageEntity::Type::BlockQuote)) {
+           entity.type == MessageEntity::Type::BlockQuote ||
+           entity.type == MessageEntity::Type::ExpandableBlockQuote)) {
         return true;
       }
       if (layer < static_cast<int32>(SecretChatLayer::SpoilerAndCustomEmojiEntities) &&

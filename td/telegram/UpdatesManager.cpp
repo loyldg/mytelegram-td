@@ -66,6 +66,7 @@
 #include "td/telegram/SecretChatsManager.h"
 #include "td/telegram/ServerMessageId.h"
 #include "td/telegram/SpecialStickerSetType.h"
+#include "td/telegram/StarManager.h"
 #include "td/telegram/StateManager.h"
 #include "td/telegram/StatisticsManager.h"
 #include "td/telegram/StickerListType.h"
@@ -1194,7 +1195,7 @@ void UpdatesManager::on_get_updates_impl(tl_object_ptr<telegram_api::Updates> up
           make_tl_object<telegram_api::peerUser>(from_id), 0, make_tl_object<telegram_api::peerUser>(update->user_id_),
           nullptr, std::move(update->fwd_from_), update->via_bot_id_, 0, std::move(update->reply_to_), update->date_,
           update->message_, nullptr, nullptr, std::move(update->entities_), 0, 0, nullptr, 0, string(), 0, nullptr,
-          Auto(), update->ttl_period_, 0);
+          Auto(), update->ttl_period_, 0, 0, nullptr);
       on_pending_update(
           make_tl_object<telegram_api::updateNewMessage>(std::move(message), update->pts_, update->pts_count_), 0,
           std::move(promise), "telegram_api::updateShortMessage");
@@ -1208,7 +1209,8 @@ void UpdatesManager::on_get_updates_impl(tl_object_ptr<telegram_api::Updates> up
           make_tl_object<telegram_api::peerUser>(update->from_id_), 0,
           make_tl_object<telegram_api::peerChat>(update->chat_id_), nullptr, std::move(update->fwd_from_),
           update->via_bot_id_, 0, std::move(update->reply_to_), update->date_, update->message_, nullptr, nullptr,
-          std::move(update->entities_), 0, 0, nullptr, 0, string(), 0, nullptr, Auto(), update->ttl_period_, 0);
+          std::move(update->entities_), 0, 0, nullptr, 0, string(), 0, nullptr, Auto(), update->ttl_period_, 0, 0,
+          nullptr);
       on_pending_update(
           make_tl_object<telegram_api::updateNewMessage>(std::move(message), update->pts_, update->pts_count_), 0,
           std::move(promise), "telegram_api::updateShortChatMessage");
@@ -2259,6 +2261,7 @@ void UpdatesManager::try_reload_data() {
                                                                                   Auto());
   td_->quick_reply_manager_->reload_quick_reply_shortcuts();
   td_->reaction_manager_->reload_reactions();
+  td_->reaction_manager_->reload_message_effects();
 
   for (int32 type = 0; type < MAX_REACTION_LIST_TYPE; type++) {
     auto reaction_list_type = static_cast<ReactionListType>(type);
@@ -4146,6 +4149,14 @@ void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateInlineBotCallba
   promise.set_value(Unit());
 }
 
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateBusinessBotCallbackQuery> update,
+                               Promise<Unit> &&promise) {
+  td_->callback_queries_manager_->on_new_business_query(
+      update->query_id_, UserId(update->user_id_), std::move(update->connection_id_), std::move(update->message_),
+      std::move(update->reply_to_message_), std::move(update->data_), update->chat_instance_);
+  promise.set_value(Unit());
+}
+
 void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateFavedStickers> update, Promise<Unit> &&promise) {
   td_->stickers_manager_->reload_favorite_stickers(true);
   promise.set_value(Unit());
@@ -4553,7 +4564,19 @@ void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateBotDeleteBusine
 
 void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateBroadcastRevenueTransactions> update,
                                Promise<Unit> &&promise) {
-  td_->statistics_manager_->on_update_dialog_revenue_transactions(std::move(update->balances_));
+  td_->statistics_manager_->on_update_dialog_revenue_transactions(DialogId(update->peer_),
+                                                                  std::move(update->balances_));
+  promise.set_value(Unit());
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateStarsBalance> update, Promise<Unit> &&promise) {
+  send_closure(G()->td(), &Td::send_update,
+               td_api::make_object<td_api::updateOwnedStarCount>(StarManager::get_star_count(update->balance_, true)));
+  promise.set_value(Unit());
+}
+
+void UpdatesManager::on_update(tl_object_ptr<telegram_api::updateStarsRevenueStatus> update, Promise<Unit> &&promise) {
+  td_->star_manager_->on_update_stars_revenue_status(std::move(update));
   promise.set_value(Unit());
 }
 

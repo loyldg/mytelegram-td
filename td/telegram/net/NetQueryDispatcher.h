@@ -27,6 +27,7 @@ namespace td {
 class DcAuthManager;
 class MultiSequenceDispatcher;
 class NetQueryDelayer;
+class NetQueryVerifier;
 class PublicRsaKeyWatchdog;
 class SessionMultiProxy;
 
@@ -56,10 +57,13 @@ class NetQueryDispatcher {
   void set_main_dc_id(int32 new_main_dc_id);
   void check_authorization_is_ok();
 
+  void set_verification_token(int64 verification_id, string &&token, Promise<Unit> &&promise);
+
  private:
   std::atomic<bool> stop_flag_{false};
   bool need_destroy_auth_key_{false};
   ActorOwn<NetQueryDelayer> delayer_;
+  ActorOwn<NetQueryVerifier> verifier_;
   ActorOwn<DcAuthManager> dc_auth_manager_;
   ActorOwn<MultiSequenceDispatcher> sequence_dispatcher_;
   struct Dc {
