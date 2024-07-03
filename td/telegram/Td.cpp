@@ -3831,6 +3831,7 @@ void Td::init_managers() {
   G()->set_sponsored_message_manager(sponsored_message_manager_actor_.get());
   star_manager_ = make_unique<StarManager>(this, create_reference());
   star_manager_actor_ = register_actor("StarManager", star_manager_.get());
+  G()->set_star_manager(star_manager_actor_.get());
   statistics_manager_ = make_unique<StatisticsManager>(this, create_reference());
   statistics_manager_actor_ = register_actor("StatisticsManager", statistics_manager_.get());
   stickers_manager_ = make_unique<StickersManager>(this, create_reference());
@@ -8752,6 +8753,19 @@ void Td::on_request(uint64 id, const td_api::getStarWithdrawalUrl &request) {
   });
   star_manager_->get_star_withdrawal_url(request.owner_id_, request.star_count_, request.password_,
                                          std::move(query_promise));
+}
+
+void Td::on_request(uint64 id, const td_api::getStarAdAccountUrl &request) {
+  CHECK_IS_USER();
+  CREATE_REQUEST_PROMISE();
+  auto query_promise = PromiseCreator::lambda([promise = std::move(promise)](Result<string> result) mutable {
+    if (result.is_error()) {
+      promise.set_error(result.move_as_error());
+    } else {
+      promise.set_value(td_api::make_object<td_api::httpUrl>(result.move_as_ok()));
+    }
+  });
+  star_manager_->get_star_ad_account_url(request.owner_id_, std::move(query_promise));
 }
 
 void Td::on_request(uint64 id, const td_api::getMessageStatistics &request) {

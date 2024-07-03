@@ -528,6 +528,8 @@ void UpdatesManager::before_get_difference(bool is_initial) {
   // may be called many times before after_get_difference is called
   send_closure(G()->state_manager(), &StateManager::on_synchronized, false);
 
+  td_->messages_manager_->before_get_difference();
+
   vector<Promise<Unit>> promises;
   if (can_postpone_updates()) {
     for (auto &update : pending_pts_updates_) {
@@ -645,11 +647,13 @@ Promise<> UpdatesManager::set_pts(int32 pts, const char *source) {
       if (old_pts > 0) {
         pts_diff_ += pts - old_pts;
         if (pts_diff_ >= 1000000) {
-          LOG(WARNING) << "Fixed " << pts_gap_ << " PTS gaps and " << pts_fixed_short_gap_ << " short gaps by sending "
-                       << pts_short_gap_ << " requests";
-          pts_short_gap_ = 0;
-          pts_fixed_short_gap_ = 0;
-          pts_gap_ = 0;
+          if (pts_gap_ > 0 || pts_short_gap_ > 0) {
+            LOG(WARNING) << "Fixed " << pts_gap_ << " PTS gaps and " << pts_fixed_short_gap_
+                         << " short gaps by sending " << pts_short_gap_ << " requests";
+            pts_short_gap_ = 0;
+            pts_fixed_short_gap_ = 0;
+            pts_gap_ = 0;
+          }
           pts_diff_ = 0;
         }
       }
