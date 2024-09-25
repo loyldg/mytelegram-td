@@ -1035,6 +1035,10 @@ unique_ptr<QuickReplyManager::QuickReplyMessage> QuickReplyManager::create_messa
         LOG(ERROR) << "Receive invalid quick reply " << shortcut_id << " from " << source;
         break;
       }
+      if (!message_id.is_valid() || !message_id.is_server()) {
+        LOG(ERROR) << "Receive invalid " << message_id << " in quick reply " << shortcut_id << " from " << source;
+        break;
+      }
       if (deleted_message_full_ids_.count({shortcut_id, message_id})) {
         // a previously deleted message
         break;
@@ -1186,11 +1190,12 @@ td_api::object_ptr<td_api::MessageSendingState> QuickReplyManager::get_message_s
 td_api::object_ptr<td_api::MessageContent> QuickReplyManager::get_quick_reply_message_message_content_object(
     const QuickReplyMessage *m) const {
   if (m->edited_content != nullptr) {
-    return get_message_content_object(m->edited_content.get(), td_, DialogId(), 0, false, true, -1,
+    return get_message_content_object(m->edited_content.get(), td_, DialogId(), false, false, 0, false, true, -1,
                                       m->edited_invert_media, m->edited_disable_web_page_preview);
   }
-  return get_message_content_object(m->content.get(), td_, DialogId(), 0, false, true, -1, m->invert_media,
-                                    m->disable_web_page_preview);
+  return get_message_content_object(m->content.get(), td_, DialogId(),
+                                    m->message_id.is_valid() && m->message_id.is_server(), false, 0, false, true, -1,
+                                    m->invert_media, m->disable_web_page_preview);
 }
 
 td_api::object_ptr<td_api::quickReplyMessage> QuickReplyManager::get_quick_reply_message_object(
@@ -3335,7 +3340,7 @@ Result<InputMessageContent> QuickReplyManager::process_input_message_content(
     return Status::Error(400, "Can't add poll as a quick reply");
   }
   if (message_content_id == td_api::inputMessagePaidMedia::ID) {
-    return Status::Error(400, "Can't send paid media as business");
+    return Status::Error(400, "Can't add paid media as a quick reply");
   }
   if (message_content_id == td_api::inputMessageLocation::ID &&
       static_cast<const td_api::inputMessageLocation *>(input_message_content.get())->live_period_ != 0) {

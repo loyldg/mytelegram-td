@@ -37,6 +37,7 @@ class AuthManager;
 class AutosaveManager;
 class BackgroundManager;
 class BoostManager;
+class BotInfoManager;
 class BusinessConnectionManager;
 class BusinessManager;
 class CallManager;
@@ -60,11 +61,14 @@ class LinkManager;
 class MessageImportManager;
 class MessagesManager;
 class NetQueryDispatcher;
+class NetQueryStats;
 class NotificationManager;
 class NotificationSettingsManager;
+class OnlineManager;
 class OptionManager;
 class PasswordManager;
 class PeopleNearbyManager;
+class PromoDataManager;
 class QuickReplyManager;
 class ReactionManager;
 class SavedMessagesManager;
@@ -237,6 +241,13 @@ class Global final : public ActorContext {
     boost_manager_ = boost_manager;
   }
 
+  ActorId<BotInfoManager> bot_info_manager() const {
+    return bot_info_manager_;
+  }
+  void set_bot_info_manager(ActorId<BotInfoManager> bot_info_manager) {
+    bot_info_manager_ = bot_info_manager;
+  }
+
   ActorId<BusinessConnectionManager> business_connection_manager() const {
     return business_connection_manager_;
   }
@@ -398,6 +409,13 @@ class Global final : public ActorContext {
     notification_settings_manager_ = notification_settings_manager;
   }
 
+  ActorId<OnlineManager> online_manager() const {
+    return online_manager_;
+  }
+  void set_online_manager(ActorId<OnlineManager> online_manager) {
+    online_manager_ = online_manager;
+  }
+
   void set_option_manager(OptionManager *option_manager) {
     option_manager_ = option_manager;
   }
@@ -415,6 +433,13 @@ class Global final : public ActorContext {
   }
   void set_people_nearby_manager(ActorId<PeopleNearbyManager> people_nearby_manager) {
     people_nearby_manager_ = people_nearby_manager;
+  }
+
+  ActorId<PromoDataManager> promo_data_manager() const {
+    return promo_data_manager_;
+  }
+  void set_promo_data_manager(ActorId<PromoDataManager> promo_data_manager) {
+    promo_data_manager_ = promo_data_manager;
   }
 
   ActorId<QuickReplyManager> quick_reply_manager() const {
@@ -657,6 +682,7 @@ class Global final : public ActorContext {
   ActorId<AutosaveManager> autosave_manager_;
   ActorId<BackgroundManager> background_manager_;
   ActorId<BoostManager> boost_manager_;
+  ActorId<BotInfoManager> bot_info_manager_;
   ActorId<BusinessConnectionManager> business_connection_manager_;
   ActorId<BusinessManager> business_manager_;
   ActorId<CallManager> call_manager_;
@@ -680,8 +706,10 @@ class Global final : public ActorContext {
   ActorId<MessagesManager> messages_manager_;
   ActorId<NotificationManager> notification_manager_;
   ActorId<NotificationSettingsManager> notification_settings_manager_;
+  ActorId<OnlineManager> online_manager_;
   ActorId<PasswordManager> password_manager_;
   ActorId<PeopleNearbyManager> people_nearby_manager_;
+  ActorId<PromoDataManager> promo_data_manager_;
   ActorId<QuickReplyManager> quick_reply_manager_;
   ActorId<ReactionManager> reaction_manager_;
   ActorId<SavedMessagesManager> saved_messages_manager_;

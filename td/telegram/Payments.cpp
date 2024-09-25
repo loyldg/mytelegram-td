@@ -8,10 +8,12 @@
 
 #include "td/telegram/AccessRights.h"
 #include "td/telegram/DialogId.h"
+#include "td/telegram/DialogInviteLink.h"
 #include "td/telegram/DialogManager.h"
 #include "td/telegram/GiveawayParameters.h"
 #include "td/telegram/Global.h"
 #include "td/telegram/InputInvoice.h"
+#include "td/telegram/LinkManager.h"
 #include "td/telegram/MessageEntity.h"
 #include "td/telegram/MessageId.h"
 #include "td/telegram/MessagesManager.h"
@@ -21,6 +23,7 @@
 #include "td/telegram/Premium.h"
 #include "td/telegram/ServerMessageId.h"
 #include "td/telegram/StarManager.h"
+#include "td/telegram/SuggestedAction.h"
 #include "td/telegram/Td.h"
 #include "td/telegram/telegram_api.h"
 #include "td/telegram/ThemeManager.h"
@@ -43,6 +46,7 @@ namespace {
 struct InputInvoiceInfo {
   DialogId dialog_id_;
   telegram_api::object_ptr<telegram_api::InputInvoice> input_invoice_;
+  int64 star_count_ = 0;
 };
 
 Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_api::InputInvoice> &&input_invoice) {
@@ -56,7 +60,7 @@ Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_ap
       auto invoice = td_api::move_object_as<td_api::inputInvoiceMessage>(input_invoice);
       DialogId dialog_id(invoice->chat_id_);
       MessageId message_id(invoice->message_id_);
-      TRY_RESULT(server_message_id, td->messages_manager_->get_invoice_message_id({dialog_id, message_id}));
+      TRY_RESULT(invoice_message_info, td->messages_manager_->get_invoice_message_info({dialog_id, message_id}));
 
       auto input_peer = td->dialog_manager_->get_input_peer(dialog_id, AccessRights::Read);
       if (input_peer == nullptr) {
@@ -64,8 +68,9 @@ Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_ap
       }
 
       result.dialog_id_ = dialog_id;
-      result.input_invoice_ =
-          make_tl_object<telegram_api::inputInvoiceMessage>(std::move(input_peer), server_message_id.get());
+      result.input_invoice_ = telegram_api::make_object<telegram_api::inputInvoiceMessage>(
+          std::move(input_peer), invoice_message_info.server_message_id_.get());
+      result.star_count_ = invoice_message_info.star_count_;
       break;
     }
     case td_api::inputInvoiceName::ID: {
@@ -131,9 +136,52 @@ Result<InputInvoiceInfo> get_input_invoice_info(Td *td, td_api::object_ptr<td_ap
           if (!clean_input_string(p->currency_)) {
             return Status::Error(400, "Strings must be encoded in UTF-8");
           }
-          auto option = telegram_api::make_object<telegram_api::starsTopupOption>(0, false /*ignored*/, p->star_count_,
-                                                                                  string(), p->currency_, p->amount_);
-          result.input_invoice_ = telegram_api::make_object<telegram_api::inputInvoiceStars>(std::move(option));
+          dismiss_suggested_action(SuggestedAction{SuggestedAction::Type::StarsSubscriptionLowBalance},
+                                   Promise<Unit>());
+          auto purpose = telegram_api::make_object<telegram_api::inputStorePaymentStarsTopup>(p->star_count_,
+                                                                                              p->currency_, p->amount_);
+          result.input_invoice_ = telegram_api::make_object<telegram_api::inputInvoiceStars>(std::move(purpose));
+          break;
+        }
+        case td_api::telegramPaymentPurposeGiftedStars::ID: {
+          auto p = static_cast<td_api::telegramPaymentPurposeGiftedStars *>(invoice->purpose_.get());
+          UserId user_id(p->user_id_);
+          TRY_RESULT(input_user, td->user_manager_->get_input_user(user_id));
+          if (p->amount_ <= 0 || !check_currency_amount(p->amount_)) {
+            return Status::Error(400, "Invalid amount of the currency specified");
+          }
+          if (!clean_input_string(p->currency_)) {
+            return Status::Error(400, "Strings must be encoded in UTF-8");
+          }
+          auto purpose = telegram_api::make_object<telegram_api::inputStorePaymentStarsGift>(
+              std::move(input_user), p->star_count_, p->currency_, p->amount_);
+          result.input_invoice_ = telegram_api::make_object<telegram_api::inputInvoiceStars>(std::move(purpose));
+          break;
+        }
+        case td_api::telegramPaymentPurposeStarGiveaway::ID: {
+          auto p = static_cast<td_api::telegramPaymentPurposeStarGiveaway *>(invoice->purpose_.get());
+          if (p->amount_ <= 0 || !check_currency_amount(p->amount_)) {
+            return Status::Error(400, "Invalid amount of the currency specified");
+          }
+          if (!clean_input_string(p->currency_)) {
+            return Status::Error(400, "Strings must be encoded in UTF-8");
+          }
+          TRY_RESULT(parameters, GiveawayParameters::get_giveaway_parameters(td, p->parameters_.get()));
+          auto purpose = parameters.get_input_store_payment_stars_giveaway(td, p->currency_, p->amount_,
+                                                                           p->winner_count_, p->star_count_);
+          result.input_invoice_ = telegram_api::make_object<telegram_api::inputInvoiceStars>(std::move(purpose));
+          break;
+        }
+        case td_api::telegramPaymentPurposeJoinChat::ID: {
+          auto p = static_cast<td_api::telegramPaymentPurposeJoinChat *>(invoice->purpose_.get());
+          if (!DialogInviteLink::is_valid_invite_link(p->invite_link_)) {
+            return Status::Error(400, "Invalid invite link");
+          }
+          auto hash = LinkManager::get_dialog_invite_link_hash(p->invite_link_);
+          if (!clean_input_string(hash)) {
+            return Status::Error(400, "Invalid invite link");
+          }
+          result.input_invoice_ = telegram_api::make_object<telegram_api::inputInvoiceChatInviteSubscription>(hash);
           break;
         }
         default:
@@ -641,6 +689,7 @@ class SendPaymentFormQuery final : public Td::ResultHandler {
 class SendStarPaymentFormQuery final : public Td::ResultHandler {
   Promise<td_api::object_ptr<td_api::paymentResult>> promise_;
   DialogId dialog_id_;
+  int64 star_count_;
 
  public:
   explicit SendStarPaymentFormQuery(Promise<td_api::object_ptr<td_api::paymentResult>> &&promise)
@@ -649,13 +698,15 @@ class SendStarPaymentFormQuery final : public Td::ResultHandler {
 
   void send(InputInvoiceInfo &&input_invoice_info, int64 payment_form_id) {
     dialog_id_ = input_invoice_info.dialog_id_;
+    star_count_ = input_invoice_info.star_count_;
+    td_->star_manager_->add_pending_owned_star_count(-star_count_, false);
 
     send_query(G()->net_query_creator().create(
         telegram_api::payments_sendStarsForm(0, payment_form_id, std::move(input_invoice_info.input_invoice_))));
   }
 
   void on_result(BufferSlice packet) final {
-    auto result_ptr = fetch_result<telegram_api::payments_sendPaymentForm>(packet);
+    auto result_ptr = fetch_result<telegram_api::payments_sendStarsForm>(packet);
     if (result_ptr.is_error()) {
       return on_error(result_ptr.move_as_error());
     }
@@ -663,6 +714,7 @@ class SendStarPaymentFormQuery final : public Td::ResultHandler {
     auto payment_result = result_ptr.move_as_ok();
     LOG(INFO) << "Receive result for SendStarPaymentFormQuery: " << to_string(payment_result);
 
+    td_->star_manager_->add_pending_owned_star_count(star_count_, true);
     switch (payment_result->get_id()) {
       case telegram_api::payments_paymentResult::ID: {
         auto result = telegram_api::move_object_as<telegram_api::payments_paymentResult>(payment_result);
@@ -684,6 +736,7 @@ class SendStarPaymentFormQuery final : public Td::ResultHandler {
 
   void on_error(Status status) final {
     td_->dialog_manager_->on_get_dialog_error(dialog_id_, status, "SendStarPaymentFormQuery");
+    td_->star_manager_->add_pending_owned_star_count(star_count_, false);
     promise_.set_error(std::move(status));
   }
 };
@@ -1045,6 +1098,9 @@ void send_payment_form(Td *td, td_api::object_ptr<td_api::InputInvoice> &&input_
   if (credentials == nullptr) {
     if (tip_amount != 0 || !order_info_id.empty() || !shipping_option_id.empty()) {
       return promise.set_error(Status::Error(400, "Invalid payment form parameters specified"));
+    }
+    if (!td->star_manager_->has_owned_star_count(input_invoice_info.star_count_)) {
+      return promise.set_error(Status::Error(400, "Have not enough Telegram Stars to complete payment"));
     }
     td->create_handler<SendStarPaymentFormQuery>(std::move(promise))
         ->send(std::move(input_invoice_info), payment_form_id);

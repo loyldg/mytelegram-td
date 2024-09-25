@@ -32,7 +32,7 @@ class BusinessChatLink {
     return !link_.empty();
   }
 
-  td_api::object_ptr<td_api::businessChatLink> get_business_chat_link_object() const;
+  td_api::object_ptr<td_api::businessChatLink> get_business_chat_link_object(const UserManager *user_manager) const;
 };
 
 StringBuilder &operator<<(StringBuilder &string_builder, const BusinessChatLink &link);
@@ -43,10 +43,10 @@ class BusinessChatLinks {
   friend StringBuilder &operator<<(StringBuilder &string_builder, const BusinessChatLinks &links);
 
  public:
-  explicit BusinessChatLinks(const UserManager *user_manager,
-                             vector<telegram_api::object_ptr<telegram_api::businessChatLink>> &&links);
+  BusinessChatLinks(const UserManager *user_manager,
+                    vector<telegram_api::object_ptr<telegram_api::businessChatLink>> &&links);
 
-  td_api::object_ptr<td_api::businessChatLinks> get_business_chat_links_object() const;
+  td_api::object_ptr<td_api::businessChatLinks> get_business_chat_links_object(const UserManager *user_manager) const;
 };
 
 StringBuilder &operator<<(StringBuilder &string_builder, const BusinessChatLinks &links);

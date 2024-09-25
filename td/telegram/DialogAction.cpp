@@ -423,6 +423,9 @@ bool DialogAction::is_canceled_by_message_of_type(MessageContentType message_con
     case MessageContentType::GiveawayWinners:
     case MessageContentType::BoostApply:
     case MessageContentType::DialogShared:
+    case MessageContentType::PaymentRefunded:
+    case MessageContentType::GiftStars:
+    case MessageContentType::PrizeStars:
       return false;
     default:
       UNREACHABLE();

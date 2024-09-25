@@ -21,6 +21,7 @@
 #include "td/telegram/misc.h"
 #include "td/telegram/net/ConnectionCreator.h"
 #include "td/telegram/net/DcId.h"
+#include "td/telegram/OnlineManager.h"
 #include "td/telegram/OptionManager.h"
 #include "td/telegram/Photo.h"
 #include "td/telegram/Photo.hpp"
@@ -2789,7 +2790,7 @@ void NotificationManager::process_push_notification(string payload, Promise<Unit
     }
   }
 
-  if (!td_->is_online()) {
+  if (!td_->online_manager_->is_online()) {
     // reset online flag to false to immediately check all connections aliveness
     send_closure(G()->state_manager(), &StateManager::on_online, false);
   }
@@ -2897,6 +2898,9 @@ string NotificationManager::convert_loc_key(const string &loc_key) {
       if (loc_key == "MESSAGE_GIVEAWAY") {
         return "MESSAGE_GIVEAWAY";
       }
+      if (loc_key == "MESSAGE_GIVEAWAY_STARS") {
+        return "MESSAGE_GIVEAWAY_STARS";
+      }
       break;
     case 'H':
       if (loc_key == "PINNED_PHOTO") {
@@ -2912,6 +2916,9 @@ string NotificationManager::convert_loc_key(const string &loc_key) {
       }
       if (loc_key == "PINNED_GIVEAWAY") {
         return "PINNED_MESSAGE_GIVEAWAY";
+      }
+      if (loc_key == "PINNED_GIVEAWAY_STARS") {
+        return "PINNED_MESSAGE_GIVEAWAY_STARS";
       }
       if (loc_key == "MESSAGE_INVOICE") {
         return "MESSAGE_INVOICE";
@@ -3086,9 +3093,9 @@ void NotificationManager::add_push_notification_user(
       false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/,
       false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/,
       false /*ignored*/, 0, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/,
-      false /*ignored*/, false /*ignored*/, sender_user_id.get(), sender_access_hash, user_name, string(), string(),
-      string(), std::move(sender_photo), nullptr, 0, Auto(), string(), string(), nullptr,
-      vector<telegram_api::object_ptr<telegram_api::username>>(), 0, nullptr, nullptr);
+      false /*ignored*/, false /*ignored*/, false /*ignored*/, sender_user_id.get(), sender_access_hash, user_name,
+      string(), string(), string(), std::move(sender_photo), nullptr, 0, Auto(), string(), string(), nullptr,
+      vector<telegram_api::object_ptr<telegram_api::username>>(), 0, nullptr, nullptr, 0);
   td_->user_manager_->on_get_user(std::move(user), "add_push_notification_user");
 }
 
@@ -3568,6 +3575,18 @@ Status NotificationManager::process_push_notification_payload(string payload, bo
       return Status::Error("Expected month count to be non-negative");
     }
     arg = PSTRING() << user_count << ' ' << month_count;
+    loc_args.clear();
+  }
+  if (loc_key == "MESSAGE_GIVEAWAY_STARS") {
+    if (loc_args.size() != 2) {
+      return Status::Error("Expected 2 arguments for MESSAGE_GIVEAWAY_STARS");
+    }
+    TRY_RESULT(user_count, to_integer_safe<int32>(loc_args[0]));
+    if (user_count <= 0) {
+      return Status::Error("Expected user count to be non-negative");
+    }
+    TRY_RESULT(star_count, to_integer_safe<int64>(loc_args[1]));
+    arg = PSTRING() << user_count << ' ' << StarManager::get_star_count(star_count);
     loc_args.clear();
   }
   if (loc_key == "MESSAGE_PAID_MEDIA") {
