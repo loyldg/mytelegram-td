@@ -418,14 +418,14 @@ static ActorOwn<> get_full_config(DcOption option, Promise<tl_object_ptr<telegra
     DcId dc_id_;
     std::shared_ptr<mtproto::PublicRsaKeyInterface> public_rsa_key_;
     vector<unique_ptr<Listener>> auth_key_listeners_;
-
+    /*
     void notify() {
       td::remove_if(auth_key_listeners_, [&](auto &listener) {
         CHECK(listener != nullptr);
         return !listener->notify();
       });
     }
-
+    */
     string auth_key_key() const {
       return PSTRING() << "config_recovery_auth" << dc_id().get_raw_id();
     }
@@ -1042,11 +1042,12 @@ void ConfigManager::request_config_from_dc_impl(DcId dc_id, bool reopen_sessions
 }
 
 void ConfigManager::do_set_ignore_sensitive_content_restrictions(bool ignore_sensitive_content_restrictions) {
-  G()->set_option_boolean("ignore_sensitive_content_restrictions", ignore_sensitive_content_restrictions);
-  bool have_ignored_restriction_reasons = G()->have_option("ignored_restriction_reasons");
-  if (have_ignored_restriction_reasons != ignore_sensitive_content_restrictions) {
-    reget_app_config(Auto());
+  if (G()->have_option("ignore_sensitive_content_restrictions") &&
+      G()->get_option_boolean("ignore_sensitive_content_restrictions") == ignore_sensitive_content_restrictions) {
+    return;
   }
+  G()->set_option_boolean("ignore_sensitive_content_restrictions", ignore_sensitive_content_restrictions);
+  reget_app_config(Auto());
 }
 
 void ConfigManager::hide_suggested_action(SuggestedAction suggested_action) {
@@ -1347,7 +1348,7 @@ void ConfigManager::process_config(tl_object_ptr<telegram_api::config> config) {
 
   if (is_from_main_dc && !options.have_option("default_reaction_need_sync")) {
     ReactionType reaction_type(config->reactions_default_);
-    if (!reaction_type.is_empty()) {
+    if (!reaction_type.is_empty() && !reaction_type.is_paid_reaction()) {
       options.set_option_string("default_reaction", reaction_type.get_string());
     }
   }
@@ -2030,6 +2031,42 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
         } else {
           LOG(ERROR) << "Receive unexpected web_app_allowed_protocols " << to_string(*value);
         }
+        continue;
+      }
+      if (key == "weather_search_username") {
+        G()->set_option_string("weather_bot_username", get_json_value_string(std::move(key_value->value_), key));
+        continue;
+      }
+      if (key == "bot_preview_medias_max") {
+        G()->set_option_integer("bot_media_preview_count_max", get_json_value_int(std::move(key_value->value_), key));
+        continue;
+      }
+      if (key == "story_weather_preload") {
+        G()->set_option_boolean("can_preload_weather", get_json_value_bool(std::move(key_value->value_), key));
+        continue;
+      }
+      if (key == "ton_proxy_address") {
+        G()->set_option_string("ton_proxy_address", get_json_value_string(std::move(key_value->value_), key));
+        continue;
+      }
+      if (key == "stars_gifts_enabled") {
+        G()->set_option_boolean("can_gift_stars", get_json_value_bool(std::move(key_value->value_), key));
+        continue;
+      }
+      if (key == "stars_paid_reaction_amount_max") {
+        G()->set_option_integer("paid_reaction_star_count_max", get_json_value_int(std::move(key_value->value_), key));
+        continue;
+      }
+      if (key == "stars_subscription_amount_max") {
+        G()->set_option_integer("subscription_star_count_max", get_json_value_int(std::move(key_value->value_), key));
+        continue;
+      }
+      if (key == "stars_usd_sell_rate_x1000") {
+        G()->set_option_integer("usd_to_thousand_star_rate", get_json_value_int(std::move(key_value->value_), key));
+        continue;
+      }
+      if (key == "stars_usd_withdraw_rate_x1000") {
+        G()->set_option_integer("thousand_star_to_usd_rate", get_json_value_int(std::move(key_value->value_), key));
         continue;
       }
 

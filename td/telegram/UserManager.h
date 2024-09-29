@@ -138,15 +138,15 @@ class UserManager final : public Actor {
 
   void on_update_user_common_chat_count(UserId user_id, int32 common_chat_count);
 
-  void on_update_user_location(UserId user_id, DialogLocation &&location);
+  void on_update_my_user_location(DialogLocation &&location);
 
-  void on_update_user_work_hours(UserId user_id, BusinessWorkHours &&work_hours);
+  void on_update_my_user_work_hours(BusinessWorkHours &&work_hours);
 
-  void on_update_user_away_message(UserId user_id, BusinessAwayMessage &&away_message);
+  void on_update_my_user_away_message(BusinessAwayMessage &&away_message);
 
-  void on_update_user_greeting_message(UserId user_id, BusinessGreetingMessage &&greeting_message);
+  void on_update_my_user_greeting_message(BusinessGreetingMessage &&greeting_message);
 
-  void on_update_user_intro(UserId user_id, BusinessIntro &&intro);
+  void on_update_my_user_intro(BusinessIntro &&intro);
 
   void on_update_user_commands(UserId user_id,
                                vector<telegram_api::object_ptr<telegram_api::botCommand>> &&bot_commands);
@@ -157,6 +157,8 @@ class UserManager final : public Actor {
 
   void on_update_bot_menu_button(UserId bot_user_id,
                                  telegram_api::object_ptr<telegram_api::BotMenuButton> &&bot_menu_button);
+
+  void on_update_bot_has_preview_medias(UserId bot_user_id, bool has_preview_medias);
 
   void on_update_secret_chat(SecretChatId secret_chat_id, int64 access_hash, UserId user_id, SecretChatState state,
                              bool is_outbound, int32 ttl, int32 date, string key_hash, int32 layer,
@@ -213,6 +215,7 @@ class UserManager final : public Actor {
     bool can_be_edited;
     bool can_join_groups;
     bool can_read_all_group_messages;
+    bool has_main_app;
     bool is_inline;
     bool is_business;
     bool need_location;
@@ -481,6 +484,7 @@ class UserManager final : public Actor {
 
     vector<RestrictionReason> restriction_reasons;
     string inline_query_placeholder;
+    int32 bot_active_users = 0;
     int32 bot_info_version = -1;
 
     AccentColorId accent_color_id;
@@ -512,6 +516,7 @@ class UserManager final : public Actor {
     bool can_join_groups = true;
     bool can_read_all_group_messages = true;
     bool can_be_edited_bot = false;
+    bool has_main_app = false;
     bool is_inline_bot = false;
     bool is_business_bot = false;
     bool need_location_bot = false;
@@ -582,6 +587,7 @@ class UserManager final : public Actor {
 
     unique_ptr<BotMenuButton> menu_button;
     vector<BotCommand> commands;
+    string privacy_policy_url;
     AdministratorRights group_administrator_rights;
     AdministratorRights broadcast_administrator_rights;
 
@@ -605,6 +611,7 @@ class UserManager final : public Actor {
     bool read_dates_private = false;
     bool contact_require_premium = false;
     bool sponsored_enabled = false;
+    bool has_preview_medias = false;
 
     bool is_common_chat_count_changed = true;
     bool is_being_updated = false;
@@ -838,6 +845,8 @@ class UserManager final : public Actor {
 
   static void on_update_user_full_menu_button(UserFull *user_full, UserId user_id,
                                               telegram_api::object_ptr<telegram_api::BotMenuButton> &&bot_menu_button);
+
+  static void on_update_user_full_has_preview_medias(UserFull *user_full, UserId user_id, bool has_preview_medias);
 
   bool have_input_peer_user(const User *u, UserId user_id, AccessRights access_rights) const;
 

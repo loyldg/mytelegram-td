@@ -12,6 +12,7 @@
 #include "td/telegram/DocumentsManager.h"
 #include "td/telegram/files/FileManager.h"
 #include "td/telegram/files/FileType.h"
+#include "td/telegram/MessageContent.h"
 #include "td/telegram/Photo.h"
 #include "td/telegram/PhotoSize.h"
 #include "td/telegram/StickersManager.h"
@@ -164,10 +165,11 @@ Result<MessageExtendedMedia> MessageExtendedMedia::get_message_extended_media(
       string mime_type = MimeType::from_extension(path_view.extension());
 
       bool has_stickers = !sticker_file_ids.empty();
-      td->videos_manager_->create_video(
-          file_id, string(), std::move(thumbnail), AnimationSize(), has_stickers, std::move(sticker_file_ids),
-          std::move(file_name), std::move(mime_type), type->duration_, type->duration_,
-          get_dimensions(paid_media->width_, paid_media->height_, nullptr), type->supports_streaming_, false, 0, false);
+      td->videos_manager_->create_video(file_id, string(), std::move(thumbnail), AnimationSize(), has_stickers,
+                                        std::move(sticker_file_ids), std::move(file_name), std::move(mime_type),
+                                        type->duration_, type->duration_,
+                                        get_dimensions(paid_media->width_, paid_media->height_, nullptr),
+                                        type->supports_streaming_, false, 0, 0.0, false);
       result.video_file_id_ = file_id;
       break;
     }
@@ -197,7 +199,7 @@ bool MessageExtendedMedia::update_to(Td *td,
   return false;
 }
 
-td_api::object_ptr<td_api::PaidMedia> MessageExtendedMedia::get_message_extended_media_object(Td *td) const {
+td_api::object_ptr<td_api::PaidMedia> MessageExtendedMedia::get_paid_media_object(Td *td) const {
   if (type_ == Type::Empty) {
     return nullptr;
   }
@@ -254,6 +256,21 @@ void MessageExtendedMedia::delete_thumbnail(Td *td) {
     default:
       UNREACHABLE();
       break;
+  }
+}
+
+unique_ptr<MessageContent> MessageExtendedMedia::get_message_content() const {
+  switch (type_) {
+    case Type::Photo:
+      return create_photo_message_content(photo_);
+    case Type::Video:
+      return create_video_message_content(video_file_id_);
+    case Type::Empty:
+    case Type::Unsupported:
+    case Type::Preview:
+    default:
+      UNREACHABLE();
+      return nullptr;
   }
 }
 

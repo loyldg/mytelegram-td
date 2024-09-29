@@ -228,6 +228,9 @@ class StoryManager final : public Actor {
                   td_api::object_ptr<td_api::inputStoryAreas> &&input_areas,
                   td_api::object_ptr<td_api::formattedText> &&input_caption, Promise<Unit> &&promise);
 
+  void edit_story_cover(DialogId owner_dialog_id, StoryId story_id, double main_frame_timestamp,
+                        Promise<Unit> &&promise);
+
   void set_story_privacy_settings(StoryId story_id, td_api::object_ptr<td_api::StoryPrivacySettings> &&settings,
                                   Promise<Unit> &&promise);
 
@@ -353,6 +356,9 @@ class StoryManager final : public Actor {
 
   td_api::object_ptr<td_api::stories> get_stories_object(int32 total_count, const vector<StoryFullId> &story_full_ids,
                                                          const vector<StoryId> &pinned_story_ids) const;
+
+  static td_api::object_ptr<td_api::CanSendStoryResult> get_can_send_story_result_object(const Status &error,
+                                                                                         bool force = false);
 
   FileSourceId get_story_file_source_id(StoryFullId story_full_id);
 

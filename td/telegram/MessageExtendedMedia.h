@@ -18,6 +18,8 @@
 
 namespace td {
 
+class MessageContent;
+
 class Td;
 
 class MessageExtendedMedia {
@@ -72,7 +74,7 @@ class MessageExtendedMedia {
   bool update_to(Td *td, telegram_api::object_ptr<telegram_api::MessageExtendedMedia> extended_media_ptr,
                  DialogId owner_dialog_id);
 
-  td_api::object_ptr<td_api::PaidMedia> get_message_extended_media_object(Td *td) const;
+  td_api::object_ptr<td_api::PaidMedia> get_paid_media_object(Td *td) const;
 
   void append_file_ids(const Td *td, vector<FileId> &file_ids) const;
 
@@ -91,6 +93,8 @@ class MessageExtendedMedia {
   }
 
   bool is_equal_but_different(const MessageExtendedMedia &other) const;
+
+  unique_ptr<MessageContent> get_message_content() const;
 
   int32 get_duration(const Td *td) const;
 
