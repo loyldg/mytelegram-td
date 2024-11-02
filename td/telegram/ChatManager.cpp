@@ -6043,7 +6043,8 @@ void ChatManager::on_update_chat_full_photo(ChatFull *chat_full, ChatId chat_id,
     }
   }
 
-  td_->file_manager_->change_files_source(file_source_id, chat_full->registered_photo_file_ids, photo_file_ids);
+  td_->file_manager_->change_files_source(file_source_id, chat_full->registered_photo_file_ids, photo_file_ids,
+                                          "on_update_chat_full_photo");
   chat_full->registered_photo_file_ids = std::move(photo_file_ids);
 }
 
@@ -6071,7 +6072,8 @@ void ChatManager::on_update_channel_full_photo(ChannelFull *channel_full, Channe
     }
   }
 
-  td_->file_manager_->change_files_source(file_source_id, channel_full->registered_photo_file_ids, photo_file_ids);
+  td_->file_manager_->change_files_source(file_source_id, channel_full->registered_photo_file_ids, photo_file_ids,
+                                          "on_update_channel_full_photo");
   channel_full->registered_photo_file_ids = std::move(photo_file_ids);
 }
 
@@ -6678,6 +6680,7 @@ void ChatManager::on_update_chat_photo(Chat *c, ChatId chat_id, DialogPhoto &&ph
   }
 
   if (need_update_dialog_photo(c->photo, photo)) {
+    LOG(DEBUG) << "Update photo of " << chat_id << " from " << c->photo << " to " << photo;
     c->photo = std::move(photo);
     c->is_photo_changed = true;
     c->need_save_to_database = true;
@@ -6844,6 +6847,7 @@ void ChatManager::on_update_channel_photo(Channel *c, ChannelId channel_id, Dial
   }
 
   if (need_update_dialog_photo(c->photo, photo)) {
+    LOG(DEBUG) << "Update photo of " << channel_id << " from " << c->photo << " to " << photo;
     c->photo = std::move(photo);
     c->is_photo_changed = true;
     c->need_save_to_database = true;
