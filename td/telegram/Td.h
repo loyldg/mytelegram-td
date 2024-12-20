@@ -84,6 +84,7 @@ class PrivacyManager;
 class PromoDataManager;
 class QuickReplyManager;
 class ReactionManager;
+class ReferralProgramManager;
 class Requests;
 class SavedMessagesManager;
 class SecureManager;
@@ -96,6 +97,7 @@ class StatisticsManager;
 class StickersManager;
 class StorageManager;
 class StoryManager;
+class SuggestedActionManager;
 class TermsOfServiceManager;
 class ThemeManager;
 class TimeZoneManager;
@@ -107,6 +109,7 @@ class UserManager;
 class VideoNotesManager;
 class VideosManager;
 class VoiceNotesManager;
+class WebAppManager;
 class WebPagesManager;
 
 extern int VERBOSITY_NAME(td_init);
@@ -237,6 +240,8 @@ class Td final : public Actor {
   ActorOwn<QuickReplyManager> quick_reply_manager_actor_;
   unique_ptr<ReactionManager> reaction_manager_;
   ActorOwn<ReactionManager> reaction_manager_actor_;
+  unique_ptr<ReferralProgramManager> referral_program_manager_;
+  ActorOwn<ReferralProgramManager> referral_program_manager_actor_;
   unique_ptr<SavedMessagesManager> saved_messages_manager_;
   ActorOwn<SavedMessagesManager> saved_messages_manager_actor_;
   unique_ptr<SponsoredMessageManager> sponsored_message_manager_;
@@ -251,6 +256,8 @@ class Td final : public Actor {
   ActorOwn<StickersManager> stickers_manager_actor_;
   unique_ptr<StoryManager> story_manager_;
   ActorOwn<StoryManager> story_manager_actor_;
+  unique_ptr<SuggestedActionManager> suggested_action_manager_;
+  ActorOwn<SuggestedActionManager> suggested_action_manager_actor_;
   unique_ptr<TermsOfServiceManager> terms_of_service_manager_;
   ActorOwn<TermsOfServiceManager> terms_of_service_manager_actor_;
   unique_ptr<ThemeManager> theme_manager_;
@@ -271,6 +278,8 @@ class Td final : public Actor {
   ActorOwn<VideoNotesManager> video_notes_manager_actor_;
   unique_ptr<VoiceNotesManager> voice_notes_manager_;
   ActorOwn<VoiceNotesManager> voice_notes_manager_actor_;
+  unique_ptr<WebAppManager> web_app_manager_;
+  ActorOwn<WebAppManager> web_app_manager_actor_;
   unique_ptr<WebPagesManager> web_pages_manager_;
   ActorOwn<WebPagesManager> web_pages_manager_actor_;
 

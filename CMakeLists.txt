@@ -6,7 +6,7 @@ if (POLICY CMP0065)
   cmake_policy(SET CMP0065 NEW)
 endif()
 
-project(TDLib VERSION 1.8.39 LANGUAGES CXX C)
+project(TDLib VERSION 1.8.41 LANGUAGES CXX C)
 
 if (NOT DEFINED CMAKE_MODULE_PATH)
   set(CMAKE_MODULE_PATH "")
@@ -443,6 +443,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/files/FileUploadManager.cpp
   td/telegram/files/PartsManager.cpp
   td/telegram/files/ResourceManager.cpp
+  td/telegram/files/ResourceState.cpp
   td/telegram/ForumTopic.cpp
   td/telegram/ForumTopicEditedData.cpp
   td/telegram/ForumTopicIcon.cpp
@@ -534,6 +535,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/OptionManager.cpp
   td/telegram/OrderedMessage.cpp
   td/telegram/OrderInfo.cpp
+  td/telegram/Outline.cpp
   td/telegram/PasswordManager.cpp
   td/telegram/Payments.cpp
   td/telegram/PeerColor.cpp
@@ -556,6 +558,10 @@ set(TDLIB_SOURCE_PART2
   td/telegram/ReactionNotificationsFrom.cpp
   td/telegram/ReactionType.cpp
   td/telegram/RecentDialogList.cpp
+  td/telegram/ReferralProgramInfo.cpp
+  td/telegram/ReferralProgramManager.cpp
+  td/telegram/ReferralProgramParameters.cpp
+  td/telegram/ReferralProgramSortOrder.cpp
   td/telegram/RepliedMessageInfo.cpp
   td/telegram/ReplyMarkup.cpp
   td/telegram/ReportReason.cpp
@@ -578,6 +584,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/SharedDialog.cpp
   td/telegram/SpecialStickerSetType.cpp
   td/telegram/SponsoredMessageManager.cpp
+  td/telegram/StarAmount.cpp
   td/telegram/StarGift.cpp
   td/telegram/StarGiftManager.cpp
   td/telegram/StarManager.cpp
@@ -602,8 +609,10 @@ set(TDLIB_SOURCE_PART2
   td/telegram/StoryStealthMode.cpp
   td/telegram/StoryViewer.cpp
   td/telegram/SuggestedAction.cpp
+  td/telegram/SuggestedActionManager.cpp
   td/telegram/Support.cpp
   td/telegram/SynchronousRequests.cpp
+  td/telegram/TargetDialogTypes.cpp
   td/telegram/Td.cpp
   td/telegram/TdDb.cpp
   td/telegram/TermsOfService.cpp
@@ -626,6 +635,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/VideosManager.cpp
   td/telegram/VoiceNotesManager.cpp
   td/telegram/WebApp.cpp
+  td/telegram/WebAppManager.cpp
+  td/telegram/WebAppOpenParameters.cpp
   td/telegram/WebPageBlock.cpp
   td/telegram/WebPagesManager.cpp
 
@@ -873,6 +884,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/OptionManager.h
   td/telegram/OrderedMessage.h
   td/telegram/OrderInfo.h
+  td/telegram/Outline.h
   td/telegram/PasswordManager.h
   td/telegram/Payments.h
   td/telegram/PeerColor.h
@@ -903,6 +915,10 @@ set(TDLIB_SOURCE_PART2
   td/telegram/ReactionType.h
   td/telegram/ReactionUnavailabilityReason.h
   td/telegram/RecentDialogList.h
+  td/telegram/ReferralProgramInfo.h
+  td/telegram/ReferralProgramManager.h
+  td/telegram/ReferralProgramParameters.h
+  td/telegram/ReferralProgramSortOrder.h
   td/telegram/RepliedMessageInfo.h
   td/telegram/ReplyMarkup.h
   td/telegram/ReportReason.h
@@ -931,6 +947,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/SharedDialog.h
   td/telegram/SpecialStickerSetType.h
   td/telegram/SponsoredMessageManager.h
+  td/telegram/StarAmount.h
   td/telegram/StarGift.h
   td/telegram/StarGiftManager.h
   td/telegram/StarManager.h
@@ -959,8 +976,10 @@ set(TDLIB_SOURCE_PART2
   td/telegram/StoryStealthMode.h
   td/telegram/StoryViewer.h
   td/telegram/SuggestedAction.h
+  td/telegram/SuggestedActionManager.h
   td/telegram/Support.h
   td/telegram/SynchronousRequests.h
+  td/telegram/TargetDialogTypes.h
   td/telegram/Td.h
   td/telegram/TdCallback.h
   td/telegram/TdDb.h
@@ -987,6 +1006,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/VideosManager.h
   td/telegram/VoiceNotesManager.h
   td/telegram/WebApp.h
+  td/telegram/WebAppManager.h
+  td/telegram/WebAppOpenParameters.h
   td/telegram/WebPageBlock.h
   td/telegram/WebPageId.h
   td/telegram/WebPagesManager.h
@@ -1054,6 +1075,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/ReactionNotificationSettings.hpp
   td/telegram/ReactionNotificationsFrom.hpp
   td/telegram/ReactionType.hpp
+  td/telegram/ReferralProgramInfo.hpp
+  td/telegram/ReferralProgramParameters.hpp
   td/telegram/RepliedMessageInfo.hpp
   td/telegram/ReplyMarkup.hpp
   td/telegram/RequestedDialogType.hpp
@@ -1061,6 +1084,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/SecureValue.hpp
   td/telegram/SendCodeHelper.hpp
   td/telegram/SharedDialog.hpp
+  td/telegram/StarAmount.hpp
   td/telegram/StarGift.hpp
   td/telegram/StarSubscriptionPricing.hpp
   td/telegram/StickerMaskPosition.hpp

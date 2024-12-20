@@ -26,6 +26,7 @@
 #include "td/telegram/Photo.h"
 #include "td/telegram/QueryCombiner.h"
 #include "td/telegram/QueryMerger.h"
+#include "td/telegram/ReferralProgramInfo.h"
 #include "td/telegram/RestrictionReason.h"
 #include "td/telegram/SecretChatId.h"
 #include "td/telegram/StoryId.h"
@@ -157,6 +158,8 @@ class UserManager final : public Actor {
   void on_update_user_commands(UserId user_id,
                                vector<telegram_api::object_ptr<telegram_api::botCommand>> &&bot_commands);
 
+  void on_update_user_referral_program_info(UserId user_id, ReferralProgramInfo &&referral_program_info);
+
   void on_update_user_need_phone_number_privacy_exception(UserId user_id, bool need_phone_number_privacy_exception);
 
   void on_update_user_wallpaper_overridden(UserId user_id, bool wallpaper_overridden);
@@ -165,6 +168,8 @@ class UserManager final : public Actor {
                                  telegram_api::object_ptr<telegram_api::BotMenuButton> &&bot_menu_button);
 
   void on_update_bot_has_preview_medias(UserId bot_user_id, bool has_preview_medias);
+
+  void on_update_bot_can_manage_emoji_status(UserId bot_user_id, bool can_manage_emoji_status);
 
   void on_update_secret_chat(SecretChatId secret_chat_id, int64 access_hash, UserId user_id, SecretChatState state,
                              bool is_outbound, int32 ttl, int32 date, string key_hash, int32 layer,
@@ -283,6 +288,8 @@ class UserManager final : public Actor {
 
   bool get_user_voice_messages_forbidden(UserId user_id) const;
 
+  bool get_my_sponsored_enabled() const;
+
   bool get_user_read_dates_private(UserId user_id);
 
   string get_user_search_text(UserId user_id) const;
@@ -334,6 +341,12 @@ class UserManager final : public Actor {
   void delete_profile_photo(int64 profile_photo_id, bool is_recursive, Promise<Unit> &&promise);
 
   void on_delete_profile_photo(int64 profile_photo_id, Promise<Unit> promise);
+
+  void toggle_user_can_manage_emoji_status(UserId user_id, bool can_manage_emoji_status, Promise<Unit> &&promise);
+
+  void set_user_emoji_status(UserId user_id, const EmojiStatus &emoji_status, Promise<Unit> &&promise);
+
+  void on_set_user_emoji_status(UserId user_id, EmojiStatus emoji_status, Promise<Unit> &&promise);
 
   void set_username(const string &username, Promise<Unit> &&promise);
 
@@ -449,6 +462,8 @@ class UserManager final : public Actor {
   void on_get_user_full(telegram_api::object_ptr<telegram_api::userFull> &&user);
 
   FileSourceId get_user_full_file_source_id(UserId user_id);
+
+  void get_web_app_placeholder(UserId user_id, Promise<td_api::object_ptr<td_api::outline>> &&promise);
 
   bool have_secret_chat(SecretChatId secret_chat_id) const;
 
@@ -575,6 +590,25 @@ class UserManager final : public Actor {
     void parse(ParserT &parser);
   };
 
+  struct BotInfo {
+    string description;
+    Photo description_photo;
+    FileId description_animation_file_id;
+
+    unique_ptr<BotMenuButton> menu_button;
+    vector<BotCommand> commands;
+    string privacy_policy_url;
+    AdministratorRights group_administrator_rights;
+    AdministratorRights broadcast_administrator_rights;
+    ReferralProgramInfo referral_program_info;
+
+    string placeholder_path;
+    int32 background_color = -1;
+    int32 background_dark_color = -1;
+    int32 header_color = -1;
+    int32 header_dark_color = -1;
+  };
+
   // do not forget to update drop_user_full and on_get_user_full
   struct UserFull {
     Photo photo;
@@ -583,17 +617,8 @@ class UserManager final : public Actor {
 
     string about;
     string private_forward_name;
-    string description;
-    Photo description_photo;
-    FileId description_animation_file_id;
     vector<FileId> registered_file_ids;
     FileSourceId file_source_id;
-
-    unique_ptr<BotMenuButton> menu_button;
-    vector<BotCommand> commands;
-    string privacy_policy_url;
-    AdministratorRights group_administrator_rights;
-    AdministratorRights broadcast_administrator_rights;
 
     int32 gift_count = 0;
     int32 common_chat_count = 0;
@@ -601,6 +626,7 @@ class UserManager final : public Actor {
 
     ChannelId personal_channel_id;
 
+    unique_ptr<BotInfo> bot_info;
     unique_ptr<BusinessInfo> business_info;
 
     bool is_blocked = false;
@@ -618,6 +644,7 @@ class UserManager final : public Actor {
     bool sponsored_enabled = false;
     bool has_preview_medias = false;
     bool can_view_revenue = false;
+    bool can_manage_emoji_status = false;
 
     bool is_common_chat_count_changed = true;
     bool is_being_updated = false;
@@ -630,6 +657,13 @@ class UserManager final : public Actor {
 
     bool is_expired() const {
       return expires_at < Time::now();
+    }
+
+    BotInfo *add_bot_info() {
+      if (bot_info == nullptr) {
+        bot_info = make_unique<BotInfo>();
+      }
+      return bot_info.get();
     }
 
     template <class StorerT>
@@ -846,6 +880,9 @@ class UserManager final : public Actor {
   static void on_update_user_full_commands(UserFull *user_full, UserId user_id,
                                            vector<telegram_api::object_ptr<telegram_api::botCommand>> &&bot_commands);
 
+  void on_update_user_full_referral_program_info(UserFull *user_full, UserId user_id,
+                                                 ReferralProgramInfo &&referral_program_info);
+
   void on_update_user_full_need_phone_number_privacy_exception(UserFull *user_full, UserId user_id,
                                                                bool need_phone_number_privacy_exception) const;
 
@@ -855,6 +892,9 @@ class UserManager final : public Actor {
                                               telegram_api::object_ptr<telegram_api::BotMenuButton> &&bot_menu_button);
 
   static void on_update_user_full_has_preview_medias(UserFull *user_full, UserId user_id, bool has_preview_medias);
+
+  static void on_update_user_full_can_manage_emoji_status(UserFull *user_full, UserId user_id,
+                                                          bool can_manage_emoji_status);
 
   bool have_input_peer_user(const User *u, UserId user_id, AccessRights access_rights) const;
 

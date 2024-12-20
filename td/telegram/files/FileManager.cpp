@@ -1354,12 +1354,14 @@ string FileManager::get_file_name(FileType file_type, Slice path) {
     case FileType::ProfilePhoto:
     case FileType::Photo:
     case FileType::PhotoStory:
+    case FileType::SelfDestructingPhoto:
       if (extension != "jpg" && extension != "jpeg" && extension != "gif" && extension != "png" && extension != "tif" &&
           extension != "bmp") {
         return fix_file_extension(file_name, "photo", "jpg");
       }
       break;
     case FileType::VoiceNote:
+    case FileType::SelfDestructingVoiceNote:
       if (extension != "ogg" && extension != "oga" && extension != "mp3" && extension != "mpeg3" &&
           extension != "m4a" && extension != "opus") {
         return fix_file_extension(file_name, "voice", "oga");
@@ -1367,6 +1369,8 @@ string FileManager::get_file_name(FileType file_type, Slice path) {
       break;
     case FileType::Video:
     case FileType::VideoNote:
+    case FileType::SelfDestructingVideo:
+    case FileType::SelfDestructingVideoNote:
       if (extension != "mov" && extension != "3gp" && extension != "mpeg4" && extension != "mp4" &&
           extension != "mkv") {
         return fix_file_extension(file_name, "video", "mp4");
@@ -2093,7 +2097,7 @@ static int merge_choose_generate_location(const unique_ptr<FullGenerateFileLocat
     }
     return x->conversion_ >= y->conversion_
                ? 0
-               : 1;  // the bigger conversion, the bigger mtime or at least more stable choise
+               : 1;  // the bigger conversion, the bigger mtime or at least more stable choice
   }
   return 2;
 }
@@ -2893,7 +2897,7 @@ void FileManager::read_file_part(FileId file_id, int64 offset, int64 count, int 
           // we need to wait for the corresponding update and repeat the reading
           create_actor<SleepActor>("RepeatReadFilePartActor", 0.01,
                                    PromiseCreator::lambda([actor_id, file_id, offset, count, left_tries,
-                                                           promise = std::move(promise)](Result<Unit> result) mutable {
+                                                           promise = std::move(promise)](Unit) mutable {
                                      send_closure(actor_id, &FileManager::read_file_part, file_id, offset, count,
                                                   left_tries - 1, std::move(promise));
                                    }))
@@ -2988,10 +2992,10 @@ void FileManager::download_file(FileId file_id, int32 priority, int64 offset, in
     info->offset_ = offset;
     info->limit_ = limit;
     info->promises_.push_back(std::move(promise));
-  }
-  download(file_id, 0, user_download_file_callback_, priority, offset, limit);
-  if (!synchronous) {
-    promise.set_value(get_file_object(file_id));
+
+    download(file_id, 0, user_download_file_callback_, priority, offset, limit);
+  } else {
+    download(file_id, 0, user_download_file_callback_, priority, offset, limit, std::move(promise));
   }
 }
 
@@ -3026,41 +3030,42 @@ void FileManager::on_user_file_download_finished(FileId file_id) {
 }
 
 void FileManager::download(FileId file_id, int64 internal_download_id, std::shared_ptr<DownloadCallback> callback,
-                           int32 new_priority, int64 offset, int64 limit) {
-  if (G()->close_flag()) {
-    return;
-  }
+                           int32 new_priority, int64 offset, int64 limit,
+                           Promise<td_api::object_ptr<td_api::file>> promise) {
+  TRY_STATUS_PROMISE(promise, G()->close_status());
   CHECK(callback != nullptr);
   CHECK(new_priority > 0);
 
   auto node = get_sync_file_node(file_id);
   if (!node) {
     LOG(INFO) << "File " << file_id << " not found";
-    return callback->on_download_error(file_id, Status::Error(400, "File not found"));
+    auto error = Status::Error(400, "File not found");
+    callback->on_download_error(file_id, error.clone());
+    return promise.set_error(std::move(error));
   }
   if (node->local_.type() == LocalFileLocation::Type::Empty) {
-    return download_impl(file_id, internal_download_id, std::move(callback), new_priority, offset, limit, Status::OK());
+    return download_impl(file_id, internal_download_id, std::move(callback), new_priority, offset, limit, Status::OK(),
+                         std::move(promise));
   }
 
   LOG(INFO) << "Asynchronously check location of file " << file_id << " before downloading";
   auto check_promise =
       PromiseCreator::lambda([actor_id = actor_id(this), file_id, internal_download_id, callback = std::move(callback),
-                              new_priority, offset, limit](Result<Unit> result) mutable {
+                              new_priority, offset, limit, promise = std::move(promise)](Result<Unit> result) mutable {
         Status check_status;
         if (result.is_error()) {
           check_status = result.move_as_error();
         }
         send_closure(actor_id, &FileManager::download_impl, file_id, internal_download_id, std::move(callback),
-                     new_priority, offset, limit, std::move(check_status));
+                     new_priority, offset, limit, std::move(check_status), std::move(promise));
       });
   check_local_location_async(node, true, std::move(check_promise));
 }
 
 void FileManager::download_impl(FileId file_id, int64 internal_download_id, std::shared_ptr<DownloadCallback> callback,
-                                int32 new_priority, int64 offset, int64 limit, Status check_status) {
-  if (G()->close_flag()) {
-    return;
-  }
+                                int32 new_priority, int64 offset, int64 limit, Status check_status,
+                                Promise<td_api::object_ptr<td_api::file>> promise) {
+  TRY_STATUS_PROMISE(promise, G()->close_status());
 
   LOG(INFO) << "Download file " << file_id << " with priority " << new_priority << " and internal identifier "
             << internal_download_id;
@@ -3072,13 +3077,16 @@ void FileManager::download_impl(FileId file_id, int64 internal_download_id, std:
   }
   if (node->local_.type() == LocalFileLocation::Type::Full) {
     LOG(INFO) << "File " << file_id << " is already downloaded";
-    return callback->on_download_ok(file_id);
+    callback->on_download_ok(file_id);
+    return promise.set_value(get_file_object(file_id));
   }
 
   FileView file_view(node);
   if (!file_view.can_download_from_server() && !file_view.can_generate()) {
     LOG(INFO) << "File " << file_id << " can't be downloaded";
-    return callback->on_download_error(file_id, Status::Error(400, "Can't download or generate the file"));
+    auto error = Status::Error(400, "Can't download or generate the file");
+    callback->on_download_error(file_id, error.clone());
+    return promise.set_error(std::move(error));
   }
 
   auto &requests = file_download_requests_[file_id];
@@ -3102,6 +3110,7 @@ void FileManager::download_impl(FileId file_id, int64 internal_download_id, std:
   run_download(node, true);
 
   try_flush_node(node, "download");
+  promise.set_value(get_file_object(file_id));
 }
 
 std::shared_ptr<FileManager::DownloadCallback> FileManager::extract_download_callback(FileId file_id,
@@ -3311,7 +3320,7 @@ void FileManager::run_download(FileNodePtr node, bool force_update_priority) {
   node->download_id_ = query_id;
   node->is_download_started_ = false;
   LOG(INFO) << "Run download of file " << file_id << " of size " << node->size_ << " from "
-            << node->remote_.full.value() << " with suggested name " << node->suggested_path() << " and encyption key "
+            << node->remote_.full.value() << " with suggested name " << node->suggested_path() << " and encryption key "
             << node->encryption_key_;
   auto download_offset = node->download_offset_;
   auto download_limit = node->get_download_limit();
