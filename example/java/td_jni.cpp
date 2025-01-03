@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -202,8 +202,8 @@ static jint register_native(JavaVM *vm) {
   std::string td_api_version = td::jni::fetch_static_string(env, td_api_class, commit_hash_field_id);
   std::string tdjni_version = td::td_api::get_git_commit_hash();
   if (tdjni_version != td_api_version) {
-    td::jni::set_fatal_error(
-        env, "Mismatched TdApi.java (" + td_api_version + ") and tdjni shared library (" + tdjni_version + ") versions");
+    td::jni::set_fatal_error(env, "Mismatched TdApi.java (" + td_api_version + ") and tdjni shared library (" +
+                                      tdjni_version + ") versions");
     return JAVA_VERSION;
   }
 

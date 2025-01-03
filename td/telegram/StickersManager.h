@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -80,6 +80,9 @@ class StickersManager final : public Actor {
   bool have_sticker(StickerSetId sticker_set_id, int64 sticker_id);
 
   bool have_custom_emoji(CustomEmojiId custom_emoji_id);
+
+  td_api::object_ptr<td_api::outline> get_sticker_outline_object(FileId file_id, bool for_animated_emoji,
+                                                                 bool for_clicked_animated_emoji) const;
 
   tl_object_ptr<td_api::sticker> get_sticker_object(FileId file_id, bool for_animated_emoji = false,
                                                     bool for_clicked_animated_emoji = false) const;
@@ -182,7 +185,8 @@ class StickersManager final : public Actor {
   vector<FileId> get_stickers(StickerType sticker_type, string query, int32 limit, DialogId dialog_id, bool force,
                               Promise<Unit> &&promise);
 
-  void search_stickers(StickerType sticker_type, string emoji, int32 limit,
+  void search_stickers(StickerType sticker_type, string emoji, const string &query,
+                       const vector<string> &input_language_codes, int32 offset, int32 limit,
                        Promise<td_api::object_ptr<td_api::stickers>> &&promise);
 
   void get_premium_stickers(int32 limit, Promise<td_api::object_ptr<td_api::stickers>> &&promise);
@@ -427,6 +431,11 @@ class StickersManager final : public Actor {
   void on_uploaded_sticker_file(FileUploadId file_upload_id, bool is_url,
                                 tl_object_ptr<telegram_api::MessageMedia> media, Promise<Unit> &&promise);
 
+  void on_find_stickers_by_query_success(StickerType sticker_type, const string &emoji, bool is_first,
+                                         telegram_api::object_ptr<telegram_api::messages_FoundStickers> &&stickers);
+
+  void on_find_stickers_by_query_fail(StickerType sticker_type, const string &emoji, Status &&error);
+
   void on_find_stickers_success(const string &emoji, tl_object_ptr<telegram_api::messages_Stickers> &&stickers);
 
   void on_find_stickers_fail(const string &emoji, Status &&error);
@@ -601,10 +610,6 @@ class StickersManager final : public Actor {
 
   CustomEmojiId get_custom_emoji_id(FileId sticker_id) const;
 
-  static vector<td_api::object_ptr<td_api::closedVectorPath>> get_sticker_minithumbnail(CSlice path,
-                                                                                        StickerSetId sticker_set_id,
-                                                                                        int64 document_id, double zoom);
-
   PhotoFormat get_sticker_set_thumbnail_format(const StickerSet *sticker_set) const;
 
   double get_sticker_set_minithumbnail_zoom(const StickerSet *sticker_set) const;
@@ -634,7 +639,8 @@ class StickersManager final : public Actor {
 
   void on_search_stickers_finished(StickerType sticker_type, const string &emoji, const FoundStickers &found_stickers);
 
-  void on_search_stickers_succeeded(StickerType sticker_type, const string &emoji, vector<FileId> &&sticker_ids);
+  void on_search_stickers_succeeded(StickerType sticker_type, const string &emoji, bool need_save_to_database,
+                                    vector<FileId> &&sticker_ids);
 
   void on_search_stickers_failed(StickerType sticker_type, const string &emoji, Status &&error);
 

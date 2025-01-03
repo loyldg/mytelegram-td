@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -54,7 +54,8 @@ int64 DownloadManagerCallback::get_internal_download_id() {
 void DownloadManagerCallback::start_file(FileId file_id, int64 internal_download_id, int8 priority,
                                          ActorShared<DownloadManager> download_manager) {
   send_closure_later(td_->file_manager_actor_, &FileManager::download, file_id, internal_download_id,
-                     make_download_file_callback(td_, std::move(download_manager)), priority, -1, -1);
+                     make_download_file_callback(td_, std::move(download_manager)), priority, -1, -1,
+                     Promise<td_api::object_ptr<td_api::file>>());
 }
 
 void DownloadManagerCallback::pause_file(FileId file_id, int64 internal_download_id) {

@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -28,6 +28,7 @@ class InputInvoice {
   struct Invoice {
     string currency_;
     vector<LabeledPricePart> price_parts_;
+    int32 subscription_period_ = 0;
     int64 max_tip_amount_ = 0;
     vector<int64> suggested_tip_amounts_;
     string recurring_payment_terms_of_service_url_;

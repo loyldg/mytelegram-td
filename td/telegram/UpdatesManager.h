@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -101,6 +101,8 @@ class UpdatesManager final : public Actor {
 
   void add_pending_pts_update(tl_object_ptr<telegram_api::Update> &&update, int32 new_pts, int32 pts_count,
                               double receive_time, Promise<Unit> &&promise, const char *source);
+
+  size_t get_pending_pts_update_count();
 
   static bool are_empty_updates(const telegram_api::Updates *updates_ptr);
 
@@ -259,8 +261,8 @@ class UpdatesManager final : public Actor {
   double last_pts_jump_warning_time_ = 0;
   double last_pts_gap_time_ = 0;
 
-  std::multiset<PendingPtsUpdate> pending_pts_updates_;
-  std::multiset<PendingPtsUpdate> postponed_pts_updates_;
+  std::multiset<PendingPtsUpdate> pending_pts_updates_;    // updates waiting PTS gap fill
+  std::multiset<PendingPtsUpdate> postponed_pts_updates_;  // updates waiting the end of getDifference
 
   std::multiset<PendingSeqUpdates> postponed_updates_;    // updates received during getDifference
   std::multiset<PendingSeqUpdates> pending_seq_updates_;  // updates with too big seq
