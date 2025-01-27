@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -682,6 +682,19 @@ SecretInputMedia photo_get_secret_input_media(FileManager *file_manager, const P
       make_tl_object<secret_api::decryptedMessageMediaPhoto>(
           std::move(thumbnail), thumbnail_width, thumbnail_height, width, height, static_cast<int32>(size),
           BufferSlice(encryption_key.key_slice()), BufferSlice(encryption_key.iv_slice()), caption)};
+}
+
+telegram_api::object_ptr<telegram_api::InputMedia> photo_get_cover_input_media(FileManager *file_manager,
+                                                                               const Photo &photo, bool force) {
+  auto input_media = photo_get_input_media(file_manager, photo, nullptr, 0, false);
+  auto file_reference = FileManager::extract_file_reference(input_media);
+  if (file_reference == FileReferenceView::invalid_file_reference()) {
+    if (!force) {
+      LOG(INFO) << "Have invalid file reference for cover " << photo;
+      return nullptr;
+    }
+  }
+  return input_media;
 }
 
 vector<FileId> photo_get_file_ids(const Photo &photo) {
