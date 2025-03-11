@@ -1,12 +1,6 @@
-cmake_minimum_required(VERSION 3.0.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
-if (POLICY CMP0065)
-  # do not export symbols from executables
-  # affects compiler checks in project(), so must be set before it
-  cmake_policy(SET CMP0065 NEW)
-endif()
-
-project(TDLib VERSION 1.8.41 LANGUAGES CXX C)
+project(TDLib VERSION 1.8.46 LANGUAGES CXX C)
 
 if (NOT DEFINED CMAKE_MODULE_PATH)
   set(CMAKE_MODULE_PATH "")
@@ -23,14 +17,6 @@ if (NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
   set(CMAKE_INSTALL_INCLUDEDIR "include")
 endif()
 
-if (POLICY CMP0054)
-  # do not expand quoted arguments
-  cmake_policy(SET CMP0054 NEW)
-endif()
-if (POLICY CMP0060)
-  # link libraries by full path
-  cmake_policy(SET CMP0060 NEW)
-endif()
 if (POLICY CMP0074)
   # use environment variables to find libraries
   cmake_policy(SET CMP0074 NEW)
@@ -47,33 +33,26 @@ if (NOT CMAKE_CROSSCOMPILING)
   option(TD_GENERATE_SOURCE_FILES "Use \"ON\" to just generate TDLib source files.")
 endif()
 
-if (TD_ENABLE_DOTNET AND (CMAKE_VERSION VERSION_LESS "3.1.0"))
-  message(FATAL_ERROR "CMake 3.1.0 or higher is required. You are running version ${CMAKE_VERSION}.")
-endif()
-
 include(CTest)
 
-if (POLICY CMP0069)
-  option(TD_ENABLE_LTO "Use \"ON\" to enable Link Time Optimization.")
+option(TD_ENABLE_LTO "Use \"ON\" to enable Link Time Optimization.")
 
-  if (TD_ENABLE_LTO)
-    cmake_policy(SET CMP0069 NEW)
-    include(CheckIPOSupported)
-    check_ipo_supported(RESULT IPO_SUPPORTED)
-    if (IPO_SUPPORTED)
-      # set_property(DIRECTORY PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE) do not work?
-      string(REPLACE ";" " " CXX_FLAGS_IPO "${CMAKE_CXX_COMPILE_OPTIONS_IPO}")
-      message(STATUS "Use link time optimization CXX options: ${CXX_FLAGS_IPO}")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CXX_FLAGS_IPO}")
+if (TD_ENABLE_LTO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT IPO_SUPPORTED)
+  if (IPO_SUPPORTED)
+    # set_property(DIRECTORY PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE) do not work?
+    string(REPLACE ";" " " CXX_FLAGS_IPO "${CMAKE_CXX_COMPILE_OPTIONS_IPO}")
+    message(STATUS "Use link time optimization CXX options: ${CXX_FLAGS_IPO}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CXX_FLAGS_IPO}")
 
-      string(REPLACE ";" " " C_FLAGS_IPO "${CMAKE_C_COMPILE_OPTIONS_IPO}")
-      message(STATUS "Use link time optimization C options: ${C_FLAGS_IPO}")
-      set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${C_FLAGS_IPO}")
+    string(REPLACE ";" " " C_FLAGS_IPO "${CMAKE_C_COMPILE_OPTIONS_IPO}")
+    message(STATUS "Use link time optimization C options: ${C_FLAGS_IPO}")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${C_FLAGS_IPO}")
 
-      string(REPLACE ";" " " LINK_FLAGS_IPO "${CMAKE_CXX_LINK_OPTIONS_IPO}")
-      message(STATUS "Use link time optimization linker options: ${LINK_FLAGS_IPO}")
-      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LINK_FLAGS_IPO}")
-    endif()
+    string(REPLACE ";" " " LINK_FLAGS_IPO "${CMAKE_CXX_LINK_OPTIONS_IPO}")
+    message(STATUS "Use link time optimization linker options: ${LINK_FLAGS_IPO}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LINK_FLAGS_IPO}")
   endif()
 endif()
 
@@ -342,6 +321,7 @@ set(TD_MTPROTO_SOURCE
 
 set(TDLIB_SOURCE_PART1
   td/telegram/AccountManager.cpp
+  td/telegram/AffiliateType.cpp
   td/telegram/AlarmManager.cpp
   td/telegram/AnimationsManager.cpp
   td/telegram/Application.cpp
@@ -361,6 +341,9 @@ set(TDLIB_SOURCE_PART1
   td/telegram/BotInfoManager.cpp
   td/telegram/BotMenuButton.cpp
   td/telegram/BotQueries.cpp
+  td/telegram/BotRecommendationManager.cpp
+  td/telegram/BotVerification.cpp
+  td/telegram/BotVerifierSettings.cpp
   td/telegram/BusinessAwayMessage.cpp
   td/telegram/BusinessAwayMessageSchedule.cpp
   td/telegram/BusinessBotManageBar.cpp
@@ -484,6 +467,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/MessageImportManager.cpp
   td/telegram/MessageInputReplyTo.cpp
   td/telegram/MessageOrigin.cpp
+  td/telegram/MessageQueryManager.cpp
   td/telegram/MessageQuote.cpp
   td/telegram/MessageReaction.cpp
   td/telegram/MessageReactor.cpp
@@ -536,6 +520,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/OrderedMessage.cpp
   td/telegram/OrderInfo.cpp
   td/telegram/Outline.cpp
+  td/telegram/PaidReactionType.cpp
   td/telegram/PasswordManager.cpp
   td/telegram/Payments.cpp
   td/telegram/PeerColor.cpp
@@ -586,6 +571,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/SponsoredMessageManager.cpp
   td/telegram/StarAmount.cpp
   td/telegram/StarGift.cpp
+  td/telegram/StarGiftAttribute.cpp
+  td/telegram/StarGiftId.cpp
   td/telegram/StarGiftManager.cpp
   td/telegram/StarManager.cpp
   td/telegram/StarSubscription.cpp
@@ -630,7 +617,9 @@ set(TDLIB_SOURCE_PART2
   td/telegram/Usernames.cpp
   td/telegram/UserPrivacySetting.cpp
   td/telegram/UserPrivacySettingRule.cpp
+  td/telegram/UserStarGift.cpp
   td/telegram/Venue.cpp
+  td/telegram/VerificationStatus.cpp
   td/telegram/VideoNotesManager.cpp
   td/telegram/VideosManager.cpp
   td/telegram/VoiceNotesManager.cpp
@@ -644,6 +633,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/AccessRights.h
   td/telegram/AccountManager.h
   td/telegram/AffectedHistory.h
+  td/telegram/AffiliateType.h
   td/telegram/AlarmManager.h
   td/telegram/AnimationsManager.h
   td/telegram/Application.h
@@ -658,6 +648,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/BackgroundType.h
   td/telegram/BaseTheme.h
   td/telegram/Birthdate.h
+  td/telegram/BotVerification.h
+  td/telegram/BotVerifierSettings.h
   td/telegram/BlockListId.h
   td/telegram/BoostManager.h
   td/telegram/BotCommand.h
@@ -665,6 +657,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/BotInfoManager.h
   td/telegram/BotMenuButton.h
   td/telegram/BotQueries.h
+  td/telegram/BotRecommendationManager.h
   td/telegram/BusinessAwayMessage.h
   td/telegram/BusinessAwayMessageSchedule.h
   td/telegram/BusinessBotManageBar.h
@@ -819,6 +812,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/MessageInputReplyTo.h
   td/telegram/MessageLinkInfo.h
   td/telegram/MessageOrigin.h
+  td/telegram/MessageQueryManager.h
   td/telegram/MessageQuote.h
   td/telegram/MessageReaction.h
   td/telegram/MessageReactor.h
@@ -885,6 +879,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/OrderedMessage.h
   td/telegram/OrderInfo.h
   td/telegram/Outline.h
+  td/telegram/PaidReactionType.h
   td/telegram/PasswordManager.h
   td/telegram/Payments.h
   td/telegram/PeerColor.h
@@ -949,6 +944,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/SponsoredMessageManager.h
   td/telegram/StarAmount.h
   td/telegram/StarGift.h
+  td/telegram/StarGiftAttribute.h
+  td/telegram/StarGiftId.h
   td/telegram/StarGiftManager.h
   td/telegram/StarManager.h
   td/telegram/StarSubscription.h
@@ -1000,7 +997,9 @@ set(TDLIB_SOURCE_PART2
   td/telegram/Usernames.h
   td/telegram/UserPrivacySetting.h
   td/telegram/UserPrivacySettingRule.h
+  td/telegram/UserStarGift.h
   td/telegram/Venue.h
+  td/telegram/VerificationStatus.h
   td/telegram/Version.h
   td/telegram/VideoNotesManager.h
   td/telegram/VideosManager.h
@@ -1018,6 +1017,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/BackgroundInfo.hpp
   td/telegram/BackgroundType.hpp
   td/telegram/Birthdate.hpp
+  td/telegram/BotVerification.hpp
+  td/telegram/BotVerifierSettings.hpp
   td/telegram/BusinessAwayMessage.hpp
   td/telegram/BusinessAwayMessageSchedule.hpp
   td/telegram/BusinessConnectedBot.hpp
@@ -1064,6 +1065,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/MinChannel.hpp
   td/telegram/NotificationGroupInfo.hpp
   td/telegram/OrderInfo.hpp
+  td/telegram/PaidReactionType.hpp
   td/telegram/Photo.hpp
   td/telegram/PhotoSize.hpp
   td/telegram/PhotoSizeSource.hpp
@@ -1086,6 +1088,8 @@ set(TDLIB_SOURCE_PART2
   td/telegram/SharedDialog.hpp
   td/telegram/StarAmount.hpp
   td/telegram/StarGift.hpp
+  td/telegram/StarGiftAttribute.hpp
+  td/telegram/StarGiftId.hpp
   td/telegram/StarSubscriptionPricing.hpp
   td/telegram/StickerMaskPosition.hpp
   td/telegram/StickerPhotoSize.hpp

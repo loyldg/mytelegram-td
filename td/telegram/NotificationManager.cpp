@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -17,6 +17,7 @@
 #include "td/telegram/files/FileManager.h"
 #include "td/telegram/Global.h"
 #include "td/telegram/logevent/LogEvent.h"
+#include "td/telegram/MessageQueryManager.h"
 #include "td/telegram/MessagesManager.h"
 #include "td/telegram/misc.h"
 #include "td/telegram/net/ConnectionCreator.h"
@@ -604,7 +605,7 @@ void NotificationManager::on_get_notifications_from_database(NotificationGroupId
   auto group_it = get_group(group_id);
   CHECK(group_it != groups_.end());
   auto &group = group_it->second;
-  CHECK(group.is_being_loaded_from_database == true);
+  CHECK(group.is_being_loaded_from_database);
   group.is_being_loaded_from_database = false;
 
   if (r_notifications.is_error()) {
@@ -2822,10 +2823,16 @@ string NotificationManager::convert_loc_key(const string &loc_key) {
       {"CHAT_DELETE_YOU", "MESSAGE_CHAT_DELETE_MEMBER_YOU"},
       {"CHAT_JOINED", "MESSAGE_CHAT_JOIN_BY_LINK"},
       {"CHAT_LEFT", "MESSAGE_CHAT_DELETE_MEMBER_LEFT"},
+      {"CHAT_LIVESTREAM_END", "MESSAGE_CHAT_LIVESTREAM_END"},
+      {"CHAT_LIVESTREAM_START", "MESSAGE_CHAT_LIVESTREAM_START"},
       {"CHAT_PHOTO_EDITED", "MESSAGE_CHAT_CHANGE_PHOTO"},
       {"CHAT_REQ_JOINED", "MESSAGE_CHAT_JOIN_BY_REQUEST"},
       {"CHAT_RETURNED", "MESSAGE_CHAT_ADD_MEMBERS_RETURNED"},
       {"CHAT_TITLE_EDITED", "MESSAGE_CHAT_CHANGE_TITLE"},
+      {"CHAT_VOICECHAT_END", "MESSAGE_CHAT_VOICECHAT_END"},
+      {"CHAT_VOICECHAT_INVITE", "MESSAGE_CHAT_VOICECHAT_INVITE"},
+      {"CHAT_VOICECHAT_INVITE_YOU", "MESSAGE_CHAT_VOICECHAT_INVITE_YOU"},
+      {"CHAT_VOICECHAT_START", "MESSAGE_CHAT_VOICECHAT_START"},
       {"CONTACT_JOINED", "MESSAGE_CONTACT_REGISTERED"},
       {"ENCRYPTED_MESSAGE", "MESSAGE"},
       {"MESSAGES", "MESSAGES"},
@@ -2851,17 +2858,21 @@ string NotificationManager::convert_loc_key(const string &loc_key) {
       {"MESSAGE_PHOTO_SECRET", "MESSAGE_SECRET_PHOTO"},
       {"MESSAGE_PLAYLIST", "MESSAGE_AUDIOS"},
       {"MESSAGE_POLL", "MESSAGE_POLL"},
+      {"MESSAGE_PROXIMITY", "MESSAGE_PROXIMITY"},
       {"MESSAGE_QUIZ", "MESSAGE_QUIZ"},
       {"MESSAGE_RECURRING_PAY", "MESSAGE_RECURRING_PAYMENT"},
       {"MESSAGE_ROUND", "MESSAGE_VIDEO_NOTE"},
       {"MESSAGE_SAME_WALLPAPER", "MESSAGE_SAME_WALLPAPER"},
       {"MESSAGE_SCREENSHOT", "MESSAGE_SCREENSHOT_TAKEN"},
       {"MESSAGE_STARGIFT", "MESSAGE_STARGIFT"},
+      {"MESSAGE_STARGIFT_UPGRADE", "MESSAGE_STARGIFT_UPGRADE"},
       {"MESSAGE_STICKER", "MESSAGE_STICKER"},
       {"MESSAGE_STORY", "MESSAGE_STORY"},
-      {"MESSAGE_SUGGEST_PHOTO", "MESSAGE_SUGGEST_PHOTO"},
+      {"MESSAGE_STORY_MENTION", "MESSAGE_STORY_MENTION"},
+      {"MESSAGE_SUGGEST_USERPIC", "MESSAGE_SUGGEST_PHOTO"},
       {"MESSAGE_TEXT", "MESSAGE_TEXT"},
       {"MESSAGE_THEME", "MESSAGE_CHAT_CHANGE_THEME"},
+      {"MESSAGE_UNIQUE_STARGIFT", "MESSAGE_STARGIFT_TRANSFER"},
       {"MESSAGE_VIDEO", "MESSAGE_VIDEO"},
       {"MESSAGE_VIDEOS", "MESSAGE_VIDEOS"},
       {"MESSAGE_VIDEO_SECRET", "MESSAGE_SECRET_VIDEO"},
@@ -2912,7 +2923,7 @@ void NotificationManager::add_push_notification_user(
       false /*ignored*/, 0, false /*ignored*/, false /*ignored*/, false /*ignored*/, false /*ignored*/,
       false /*ignored*/, false /*ignored*/, false /*ignored*/, sender_user_id.get(), sender_access_hash, user_name,
       string(), string(), string(), std::move(sender_photo), nullptr, 0, Auto(), string(), string(), nullptr,
-      vector<telegram_api::object_ptr<telegram_api::username>>(), 0, nullptr, nullptr, 0);
+      vector<telegram_api::object_ptr<telegram_api::username>>(), 0, nullptr, nullptr, 0, 0, 0);
   td_->user_manager_->on_get_user(std::move(user), "add_push_notification_user");
 }
 
@@ -3347,6 +3358,11 @@ Status NotificationManager::process_push_notification_payload(string payload, bo
     return Status::Error(406, "Reaction notifications are unsupported");
   }
 
+  if (begins_with(loc_key, "STORY_")) {
+    // TODO STORY_NOTEXT, STORY_HIDDEN_AUTHOR notifications
+    return Status::Error(406, "Story notifications are unsupported");
+  }
+
   loc_key = convert_loc_key(loc_key);
   if (loc_key.empty()) {
     return Status::Error("Push type is unknown");
@@ -3494,11 +3510,16 @@ Status NotificationManager::process_push_notification_payload(string payload, bo
     } else if (custom.has_field("ringtone")) {
       TRY_RESULT_ASSIGN(ringtone_id, custom.get_optional_long_field("ringtone"));
     }
-    add_message_push_notification(dialog_id, MessageId(server_message_id), random_id, sender_user_id, sender_dialog_id,
-                                  std::move(sender_name), sent_date, is_from_scheduled, contains_mention,
-                                  disable_notification, ringtone_id, std::move(loc_key), std::move(arg),
-                                  std::move(attached_photo), std::move(attached_document), NotificationId(), 0,
-                                  std::move(promise));
+    auto message_id = MessageId(server_message_id);
+
+    TRY_RESULT(report_delivery_until_date, custom.get_optional_int_field("report_delivery_until_date"));
+    if (report_delivery_until_date > 0) {
+      td_->message_query_manager_->report_message_delivery({dialog_id, message_id}, report_delivery_until_date, true);
+    }
+    add_message_push_notification(
+        dialog_id, message_id, random_id, sender_user_id, sender_dialog_id, std::move(sender_name), sent_date,
+        is_from_scheduled, contains_mention, disable_notification, ringtone_id, std::move(loc_key), std::move(arg),
+        std::move(attached_photo), std::move(attached_document), NotificationId(), 0, std::move(promise));
   }
   return Status::OK();
 }
