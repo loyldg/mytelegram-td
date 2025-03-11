@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -1435,7 +1435,7 @@ vector<int> FileManager::get_missing_file_parts(const Status &error) {
   auto error_message = error.message();
   if (begins_with(error_message, "FILE_PART_") && ends_with(error_message, "_MISSING")) {
     auto r_file_part = to_integer_safe<int>(error_message.substr(10, error_message.size() - 18));
-    if (r_file_part.is_error()) {
+    if (r_file_part.is_error() || r_file_part.ok() < 0) {
       LOG(ERROR) << "Receive error " << error;
     } else {
       result.push_back(r_file_part.ok());
@@ -2609,7 +2609,7 @@ void FileManager::clear_from_pmc(FileNodePtr node) {
     return;
   }
 
-  LOG(INFO) << "Delete files " << format::as_array(node->file_ids_) << " from pmc";
+  LOG(INFO) << "Delete files " << node->file_ids_ << " from pmc";
   FileData data;
   auto file_view = FileView(node);
   if (file_view.has_full_local_location()) {
@@ -3842,13 +3842,10 @@ void FileManager::run_upload(FileNodePtr node, vector<int> bad_parts) {
 
   CHECK(node->upload_id_ == 0);
   if (file_view.has_alive_remote_location() && !file_view.has_active_upload_remote_location() &&
-      can_reuse_remote_file(file_view.get_type())) {
+      can_reuse_remote_file(file_view.get_type()) && !node->upload_was_update_file_reference_) {
     FileUploadManager::QueryId query_id =
         upload_queries_.create(UploadQuery{file_id, UploadQuery::Type::UploadWaitFileReference});
     node->upload_id_ = query_id;
-    if (node->upload_was_update_file_reference_) {
-      return on_upload_error(query_id, Status::Error("Can't upload file: have no valid file reference"));
-    }
     node->upload_was_update_file_reference_ = true;
 
     context_->repair_file_reference(node->main_file_id_,
@@ -4477,6 +4474,50 @@ vector<string> FileManager::extract_file_references(
       return transform(static_cast<const telegram_api::inputMediaPaidMedia *>(input_media.get())->extended_media_,
                        [](const telegram_api::object_ptr<telegram_api::InputMedia> &media) {
                          return extract_file_reference(media);
+                       });
+    default:
+      return {};
+  }
+}
+
+string FileManager::extract_cover_file_reference(
+    const telegram_api::object_ptr<telegram_api::InputMedia> &input_media) {
+  if (input_media == nullptr) {
+    return string();
+  }
+
+  switch (input_media->get_id()) {
+    case telegram_api::inputMediaDocument::ID:
+      return extract_file_reference(
+          static_cast<const telegram_api::inputMediaDocument *>(input_media.get())->video_cover_);
+    case telegram_api::inputMediaDocumentExternal::ID:
+      return extract_file_reference(
+          static_cast<const telegram_api::inputMediaDocumentExternal *>(input_media.get())->video_cover_);
+    case telegram_api::inputMediaUploadedDocument::ID:
+      return extract_file_reference(
+          static_cast<const telegram_api::inputMediaUploadedDocument *>(input_media.get())->video_cover_);
+    case telegram_api::inputMediaPaidMedia::ID:
+      UNREACHABLE();
+      return string();
+    default:
+      return string();
+  }
+}
+
+vector<string> FileManager::extract_cover_file_references(
+    const telegram_api::object_ptr<telegram_api::InputMedia> &input_media) {
+  if (input_media == nullptr) {
+    return {};
+  }
+  switch (input_media->get_id()) {
+    case telegram_api::inputMediaDocument::ID:
+    case telegram_api::inputMediaDocumentExternal::ID:
+    case telegram_api::inputMediaUploadedDocument::ID:
+      return {extract_cover_file_reference(input_media)};
+    case telegram_api::inputMediaPaidMedia::ID:
+      return transform(static_cast<const telegram_api::inputMediaPaidMedia *>(input_media.get())->extended_media_,
+                       [](const telegram_api::object_ptr<telegram_api::InputMedia> &media) {
+                         return extract_cover_file_reference(media);
                        });
     default:
       return {};

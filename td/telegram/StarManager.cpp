@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -24,6 +24,7 @@
 #include "td/telegram/ServerMessageId.h"
 #include "td/telegram/StarAmount.h"
 #include "td/telegram/StarGift.h"
+#include "td/telegram/StarGiftManager.h"
 #include "td/telegram/StarSubscription.h"
 #include "td/telegram/StatisticsManager.h"
 #include "td/telegram/StickersManager.h"
@@ -233,6 +234,7 @@ class GetStarsTransactionsQuery final : public Td::ResultHandler {
     bool for_user = dialog_id_.get_type() == DialogType::User && !for_bot;
     bool for_chat = !for_user && !for_bot;
     bool for_channel = for_chat && td_->dialog_manager_->is_broadcast_channel(dialog_id_);
+    bool for_supergroup = for_chat && !for_channel;
     vector<td_api::object_ptr<td_api::starTransaction>> transactions;
     for (auto &transaction : result->history_) {
       vector<FileId> file_ids;
@@ -284,7 +286,7 @@ class GetStarsTransactionsQuery final : public Td::ResultHandler {
         transaction->extended_media_.clear();
         return extended_media_objects;
       };
-      auto get_message_id_object = [&]() {
+      auto get_message_id_object = [&] {
         auto message_id = MessageId(ServerMessageId(transaction->msg_id_));
         if (message_id != MessageId() && !message_id.is_valid()) {
           LOG(ERROR) << "Receive " << message_id << " in " << to_string(transaction);
@@ -344,7 +346,7 @@ class GetStarsTransactionsQuery final : public Td::ResultHandler {
               return nullptr;
             }();
             if (state != nullptr || is_refund) {
-              if (for_bot || for_chat) {
+              if (for_user || for_bot || for_chat) {
                 return td_api::make_object<td_api::starTransactionTypeFragmentWithdrawal>(std::move(state));
               }
               return nullptr;
@@ -370,25 +372,76 @@ class GetStarsTransactionsQuery final : public Td::ResultHandler {
               return td_api::make_object<td_api::starTransactionTypeAffiliateProgramCommission>(chat_id,
                                                                                                 commission_per_mille);
             }
+            if (transaction->paid_messages_) {
+              if (is_purchase) {
+                if (!td_->dialog_manager_->is_broadcast_channel(dialog_id) && for_user) {
+                  SCOPE_EXIT {
+                    product_info = nullptr;
+                    transaction->paid_messages_ = 0;
+                  };
+                  td_->dialog_manager_->force_create_dialog(dialog_id, "starsTransactionPeer", true);
+                  auto chat_id =
+                      td_->dialog_manager_->get_chat_id_object(dialog_id, "starTransactionTypePaidMessageSend");
+                  return td_api::make_object<td_api::starTransactionTypePaidMessageSend>(chat_id,
+                                                                                         transaction->paid_messages_);
+                }
+              } else {
+                if ((for_user || for_supergroup) && affiliate != nullptr) {
+                  SCOPE_EXIT {
+                    product_info = nullptr;
+                    transaction->paid_messages_ = 0;
+                    affiliate = nullptr;
+                  };
+                  return td_api::make_object<td_api::starTransactionTypePaidMessageReceive>(
+                      get_message_sender_object(td_, dialog_id, "starTransactionTypePaidMessageReceive"),
+                      transaction->paid_messages_, affiliate->commission_per_mille_,
+                      std::move(affiliate->star_amount_));
+                }
+              }
+              return nullptr;
+            }
             if (dialog_id.get_type() == DialogType::User) {
               auto user_id = dialog_id.get_user_id();
               auto user_id_object = td_->user_manager_->get_user_id_object(user_id, "starsTransactionPeer");
               if (transaction->stargift_ != nullptr) {
-                auto gift = StarGift(td_, std::move(transaction->stargift_));
+                auto gift = StarGift(td_, std::move(transaction->stargift_), true);
                 transaction->stargift_ = nullptr;
                 if (!gift.is_valid()) {
                   return nullptr;
                 }
-                auto gift_object = gift.get_gift_object(td_);
+                td_->star_gift_manager_->on_get_star_gift(gift, true);
                 if (is_purchase) {
-                  if (for_user || for_bot) {
-                    return td_api::make_object<td_api::starTransactionTypeGiftPurchase>(user_id_object,
-                                                                                        std::move(gift_object));
+                  if (gift.is_unique()) {
+                    if (transaction->stargift_upgrade_) {
+                      if (for_user) {
+                        transaction->stargift_upgrade_ = false;
+                        transaction->msg_id_ = 0;  // ignore
+                        product_info = nullptr;
+                        return td_api::make_object<td_api::starTransactionTypeGiftUpgrade>(
+                            user_id_object, gift.get_upgraded_gift_object(td_));
+                      }
+                    } else {
+                      if (for_user) {
+                        return td_api::make_object<td_api::starTransactionTypeGiftTransfer>(
+                            get_message_sender_object(td_, user_id, DialogId(), "starTransactionTypeGiftTransfer"),
+                            gift.get_upgraded_gift_object(td_));
+                      }
+                    }
+                  } else {
+                    if (for_user || for_bot) {
+                      return td_api::make_object<td_api::starTransactionTypeGiftPurchase>(
+                          get_message_sender_object(td_, user_id, DialogId(), "starTransactionTypeGiftPurchase"),
+                          gift.get_gift_object(td_));
+                    }
                   }
                 } else {
-                  if (for_user) {
-                    return td_api::make_object<td_api::starTransactionTypeGiftSale>(user_id_object,
-                                                                                    std::move(gift_object));
+                  if (gift.is_unique()) {
+                    LOG(ERROR) << "Receive sale of an upgraded gift";
+                  } else {
+                    if (for_user || for_channel) {
+                      return td_api::make_object<td_api::starTransactionTypeGiftSale>(user_id_object,
+                                                                                      gift.get_gift_object(td_));
+                    }
                   }
                 }
                 return nullptr;
@@ -452,8 +505,19 @@ class GetStarsTransactionsQuery final : public Td::ResultHandler {
               if (product_info != nullptr) {
                 if (is_purchase) {
                   if (for_user) {
-                    return td_api::make_object<td_api::starTransactionTypeBotInvoicePurchase>(user_id_object,
-                                                                                              std::move(product_info));
+                    if (transaction->premium_gift_months_ > 0) {
+                      SCOPE_EXIT {
+                        transaction->premium_gift_months_ = 0;
+                        product_info = nullptr;
+                      };
+                      return td_api::make_object<td_api::starTransactionTypePremiumPurchase>(
+                          user_id_object, transaction->premium_gift_months_,
+                          td_->stickers_manager_->get_premium_gift_sticker_object(transaction->premium_gift_months_,
+                                                                                  0));
+                    } else {
+                      return td_api::make_object<td_api::starTransactionTypeBotInvoicePurchase>(
+                          user_id_object, std::move(product_info));
+                    }
                   }
                 } else {
                   if (for_bot) {
@@ -486,6 +550,32 @@ class GetStarsTransactionsQuery final : public Td::ResultHandler {
             // partner isn't a user now
             td_->dialog_manager_->force_create_dialog(dialog_id, "starsTransactionPeer", true);
             auto chat_id = td_->dialog_manager_->get_chat_id_object(dialog_id, "starsTransactionPeer");
+            if (transaction->stargift_ != nullptr) {
+              auto gift = StarGift(td_, std::move(transaction->stargift_), true);
+              transaction->stargift_ = nullptr;
+              if (!gift.is_valid()) {
+                return nullptr;
+              }
+              td_->star_gift_manager_->on_get_star_gift(gift, true);
+              if (is_purchase) {
+                if (gift.is_unique()) {
+                  if (!transaction->stargift_upgrade_) {
+                    if (for_user) {
+                      return td_api::make_object<td_api::starTransactionTypeGiftTransfer>(
+                          get_message_sender_object(td_, UserId(), dialog_id, "starTransactionTypeGiftTransfer"),
+                          gift.get_upgraded_gift_object(td_));
+                    }
+                  }
+                } else {
+                  if (for_user || for_bot) {
+                    return td_api::make_object<td_api::starTransactionTypeGiftPurchase>(
+                        get_message_sender_object(td_, UserId(), dialog_id, "starTransactionTypeGiftPurchase"),
+                        gift.get_gift_object(td_));
+                  }
+                }
+              }
+              return nullptr;
+            }
             if (transaction->giveaway_post_id_ > 0) {
               if (for_user && dialog_id.get_type() == DialogType::Channel) {
                 SCOPE_EXIT {
@@ -589,6 +679,15 @@ class GetStarsTransactionsQuery final : public Td::ResultHandler {
         }
         if (commission_per_mille != 0) {
           LOG(ERROR) << "Receive commission with " << to_string(star_transaction);
+        }
+        if (transaction->stargift_upgrade_) {
+          LOG(ERROR) << "Receive gift upgrade with " << to_string(star_transaction);
+        }
+        if (transaction->paid_messages_) {
+          LOG(ERROR) << "Receive paid messages with " << to_string(star_transaction);
+        }
+        if (transaction->premium_gift_months_) {
+          LOG(ERROR) << "Receive Telegram Premium purchase with " << to_string(star_transaction);
         }
       }
       if (!file_ids.empty()) {
@@ -908,6 +1007,34 @@ class GetStarsRevenueAdsAccountUrlQuery final : public Td::ResultHandler {
   }
 };
 
+class GetPaidMessageRevenueQuery final : public Td::ResultHandler {
+  Promise<td_api::object_ptr<td_api::starCount>> promise_;
+
+ public:
+  explicit GetPaidMessageRevenueQuery(Promise<td_api::object_ptr<td_api::starCount>> &&promise)
+      : promise_(std::move(promise)) {
+  }
+
+  void send(telegram_api::object_ptr<telegram_api::InputUser> &&input_user) {
+    send_query(G()->net_query_creator().create(telegram_api::account_getPaidMessagesRevenue(std::move(input_user))));
+  }
+
+  void on_result(BufferSlice packet) final {
+    auto result_ptr = fetch_result<telegram_api::account_getPaidMessagesRevenue>(packet);
+    if (result_ptr.is_error()) {
+      return on_error(result_ptr.move_as_error());
+    }
+
+    auto ptr = result_ptr.move_as_ok();
+    LOG(DEBUG) << "Receive result for GetPaidMessageRevenueQuery: " << to_string(ptr);
+    promise_.set_value(td_api::make_object<td_api::starCount>(StarManager::get_star_count(ptr->stars_amount_)));
+  }
+
+  void on_error(Status status) final {
+    promise_.set_error(std::move(status));
+  }
+};
+
 StarManager::StarManager(Td *td, ActorShared<> parent) : td_(td), parent_(std::move(parent)) {
 }
 
@@ -999,9 +1126,6 @@ Status StarManager::can_manage_stars(DialogId dialog_id, bool allow_self) const 
     }
     case DialogType::Channel: {
       auto channel_id = dialog_id.get_channel_id();
-      if (!td_->chat_manager_->is_broadcast_channel(channel_id)) {
-        return Status::Error(400, "Chat is not a channel");
-      }
       if (!td_->chat_manager_->get_channel_permissions(channel_id).is_creator() && !allow_self) {
         return Status::Error(400, "Not enough rights");
       }
@@ -1094,14 +1218,14 @@ void StarManager::refund_star_payment(UserId user_id, const string &telegram_pay
 void StarManager::get_star_revenue_statistics(const td_api::object_ptr<td_api::MessageSender> &owner_id, bool is_dark,
                                               Promise<td_api::object_ptr<td_api::starRevenueStatistics>> &&promise) {
   TRY_RESULT_PROMISE(promise, dialog_id, get_message_sender_dialog_id(td_, owner_id, true, false));
-  TRY_STATUS_PROMISE(promise, can_manage_stars(dialog_id));
+  TRY_STATUS_PROMISE(promise, can_manage_stars(dialog_id, true));
   td_->create_handler<GetStarsRevenueStatsQuery>(std::move(promise))->send(dialog_id, is_dark);
 }
 
 void StarManager::get_star_withdrawal_url(const td_api::object_ptr<td_api::MessageSender> &owner_id, int64 star_count,
                                           const string &password, Promise<string> &&promise) {
   TRY_RESULT_PROMISE(promise, dialog_id, get_message_sender_dialog_id(td_, owner_id, true, false));
-  TRY_STATUS_PROMISE(promise, can_manage_stars(dialog_id));
+  TRY_STATUS_PROMISE(promise, can_manage_stars(dialog_id, true));
   if (password.empty()) {
     return promise.set_error(Status::Error(400, "PASSWORD_HASH_INVALID"));
   }
@@ -1133,6 +1257,11 @@ void StarManager::get_star_ad_account_url(const td_api::object_ptr<td_api::Messa
   td_->create_handler<GetStarsRevenueAdsAccountUrlQuery>(std::move(promise))->send(dialog_id);
 }
 
+void StarManager::get_paid_message_revenue(UserId user_id, Promise<td_api::object_ptr<td_api::starCount>> &&promise) {
+  TRY_RESULT_PROMISE(promise, input_user, td_->user_manager_->get_input_user(user_id));
+  td_->create_handler<GetPaidMessageRevenueQuery>(std::move(promise))->send(std::move(input_user));
+}
+
 void StarManager::reload_star_transaction(DialogId dialog_id, const string &transaction_id, bool is_refund,
                                           Promise<Unit> &&promise) {
   TRY_STATUS_PROMISE(promise, can_manage_stars(dialog_id, true));
@@ -1154,7 +1283,7 @@ void StarManager::reload_owned_star_count() {
 void StarManager::on_update_stars_revenue_status(
     telegram_api::object_ptr<telegram_api::updateStarsRevenueStatus> &&update) {
   DialogId dialog_id(update->peer_);
-  if (can_manage_stars(dialog_id).is_error()) {
+  if (can_manage_stars(dialog_id, true).is_error()) {
     LOG(ERROR) << "Receive " << to_string(update);
     return;
   }

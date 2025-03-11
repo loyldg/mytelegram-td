@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2024
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -316,7 +316,8 @@ telegram_api::object_ptr<telegram_api::InputMedia> get_story_content_input_media
     }
     case StoryContentType::Video: {
       const auto *story_content = static_cast<const StoryContentVideo *>(content);
-      return td->videos_manager_->get_input_media(story_content->file_id_, std::move(input_file), nullptr, 0, false);
+      return td->videos_manager_->get_input_media(story_content->file_id_, std::move(input_file), nullptr, Photo(), 0,
+                                                  0, false);
     }
     case StoryContentType::Unsupported:
     default:
