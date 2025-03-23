@@ -12026,7 +12026,7 @@ void MessagesManager::on_get_dialogs(FolderId folder_id, vector<tl_object_ptr<te
   for (auto &dialog : dialogs) {
     //    LOG(INFO) << to_string(dialog);
     DialogId dialog_id(dialog->peer_);
-    bool has_pts = (dialog->flags_ & DIALOG_FLAG_HAS_PTS) != 0;
+    bool has_pts = dialog->pts_ > 0;
 
     if (!dialog_id.is_valid()) {
       LOG(ERROR) << "Receive wrong " << dialog_id;
@@ -12184,7 +12184,7 @@ void MessagesManager::on_get_dialogs(FolderId folder_id, vector<tl_object_ptr<te
     need_update_dialog_pos |=
         update_dialog_draft_message(d, get_draft_message(td_, std::move(dialog->draft_)), true, false);
     if (is_new) {
-      bool has_pts = (dialog->flags_ & DIALOG_FLAG_HAS_PTS) != 0;
+      bool has_pts = dialog->pts_ > 0;
       if (last_message_id.is_valid() && !td_->auth_manager_->is_bot()) {
         MessageFullId message_full_id(dialog_id, last_message_id);
         auto it = message_full_id_to_message.find(message_full_id);
@@ -12223,7 +12223,7 @@ void MessagesManager::on_get_dialogs(FolderId folder_id, vector<tl_object_ptr<te
 
     if (!td_->auth_manager_->is_bot() && !from_pinned_dialog_list) {
       // set is_pinned only after updating chat position to ensure that order is initialized
-      bool is_pinned = (dialog->flags_ & DIALOG_FLAG_IS_PINNED) != 0;
+      bool is_pinned = dialog->pinned_;
       bool was_pinned = is_dialog_pinned(DialogListId(d->folder_id), dialog_id);
       if (is_pinned != was_pinned) {
         set_dialog_is_pinned(DialogListId(d->folder_id), d, is_pinned);
@@ -33722,14 +33722,11 @@ void MessagesManager::on_get_channel_difference(DialogId dialog_id, int32 reques
   switch (difference_ptr->get_id()) {
     case telegram_api::updates_channelDifferenceEmpty::ID: {
       auto difference = move_tl_object_as<telegram_api::updates_channelDifferenceEmpty>(difference_ptr);
-      int32 flags = difference->flags_;
-      is_final = (flags & CHANNEL_DIFFERENCE_FLAG_IS_FINAL) != 0;
+      is_final = difference->final_;
+      timeout = difference->timeout_;
       LOG_IF(ERROR, !is_final) << "Receive channelDifferenceEmpty as result of getChannelDifference from " << source
                                << " with PTS = " << request_pts << " and limit = " << request_limit << " in "
                                << dialog_id << ", but it is not final";
-      if (flags & CHANNEL_DIFFERENCE_FLAG_HAS_TIMEOUT) {
-        timeout = difference->timeout_;
-      }
 
       // bots can receive channelDifferenceEmpty with PTS bigger than known PTS
       // also, this can happen for deleted channels
@@ -33744,12 +33741,8 @@ void MessagesManager::on_get_channel_difference(DialogId dialog_id, int32 reques
     }
     case telegram_api::updates_channelDifference::ID: {
       auto difference = move_tl_object_as<telegram_api::updates_channelDifference>(difference_ptr);
-
-      int32 flags = difference->flags_;
-      is_final = (flags & CHANNEL_DIFFERENCE_FLAG_IS_FINAL) != 0;
-      if (flags & CHANNEL_DIFFERENCE_FLAG_HAS_TIMEOUT) {
-        timeout = difference->timeout_;
-      }
+      is_final = difference->final_;
+      timeout = difference->timeout_;
 
       auto new_pts = difference->pts_;
       if (request_pts >= new_pts && request_pts > 1 && (request_pts > new_pts || !td_->auth_manager_->is_bot())) {
@@ -33809,11 +33802,8 @@ void MessagesManager::on_get_channel_difference(DialogId dialog_id, int32 reques
         return after_get_channel_difference(dialog_id, false);
       }
 
-      int32 flags = difference->flags_;
-      is_final = (flags & CHANNEL_DIFFERENCE_FLAG_IS_FINAL) != 0;
-      if (flags & CHANNEL_DIFFERENCE_FLAG_HAS_TIMEOUT) {
-        timeout = difference->timeout_;
-      }
+      is_final = difference->final_;
+      timeout = difference->timeout_;
 
       auto new_pts = dialog->pts_;
       if (request_pts > new_pts - request_limit) {
@@ -33847,7 +33837,7 @@ void MessagesManager::on_get_channel_difference(DialogId dialog_id, int32 reques
 
       if (!td_->auth_manager_->is_bot()) {
         // set is_pinned only after updating chat position to ensure that order is initialized
-        bool is_pinned = (dialog->flags_ & DIALOG_FLAG_IS_PINNED) != 0;
+        bool is_pinned = dialog->pinned_;
         bool was_pinned = is_dialog_pinned(DialogListId(d->folder_id), dialog_id);
         if (is_pinned != was_pinned) {
           set_dialog_is_pinned(DialogListId(d->folder_id), d, is_pinned);
