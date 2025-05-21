@@ -121,6 +121,8 @@ class ChatManager final : public Actor {
 
   bool get_channel_stories_hidden(ChannelId channel_id) const;
 
+  bool get_channel_autotranslation(ChannelId channel_id) const;
+
   bool can_poll_channel_active_stories(ChannelId channel_id) const;
 
   bool can_use_premium_custom_emoji_in_channel(ChannelId channel_id) const;
@@ -258,6 +260,9 @@ class ChatManager final : public Actor {
 
   void toggle_channel_can_have_sponsored_messages(ChannelId channel_id, bool can_have_sponsored_messages,
                                                   Promise<Unit> &&promise);
+
+  void toggle_channel_has_automatic_translation(ChannelId channel_id, bool has_automatic_translation,
+                                                Promise<Unit> &&promise);
 
   void toggle_channel_has_hidden_participants(ChannelId channel_id, bool has_hidden_participants,
                                               Promise<Unit> &&promise);
@@ -507,6 +512,7 @@ class ChatManager final : public Actor {
     bool join_to_send = false;
     bool join_request = false;
     bool stories_hidden = false;
+    bool autotranslation = false;
 
     bool is_megagroup = false;
     bool is_gigagroup = false;
@@ -628,49 +634,10 @@ class ChatManager final : public Actor {
   class ChatLogEvent;
   class ChannelLogEvent;
 
-  static constexpr size_t MAX_TITLE_LENGTH = 128;        // server side limit for chat title
-  static constexpr size_t MAX_DESCRIPTION_LENGTH = 255;  // server side limit for chat/channel description
+  static constexpr size_t MAX_TITLE_LENGTH = 128;        // server-side limit for chat title
+  static constexpr size_t MAX_DESCRIPTION_LENGTH = 255;  // server-side limit for chat/channel description
 
   static constexpr int32 MAX_ACTIVE_STORY_ID_RELOAD_TIME = 3600;  // some reasonable limit
-
-  static constexpr int32 CHAT_FLAG_USER_IS_CREATOR = 1 << 0;
-  static constexpr int32 CHAT_FLAG_USER_HAS_LEFT = 1 << 2;
-  // static constexpr int32 CHAT_FLAG_ADMINISTRATORS_ENABLED = 1 << 3;
-  // static constexpr int32 CHAT_FLAG_IS_ADMINISTRATOR = 1 << 4;
-  static constexpr int32 CHAT_FLAG_IS_DEACTIVATED = 1 << 5;
-  static constexpr int32 CHAT_FLAG_WAS_MIGRATED = 1 << 6;
-  static constexpr int32 CHAT_FLAG_HAS_ACTIVE_GROUP_CALL = 1 << 23;
-  static constexpr int32 CHAT_FLAG_IS_GROUP_CALL_NON_EMPTY = 1 << 24;
-  static constexpr int32 CHAT_FLAG_NOFORWARDS = 1 << 25;
-
-  static constexpr int32 CHANNEL_FLAG_USER_IS_CREATOR = 1 << 0;
-  static constexpr int32 CHANNEL_FLAG_USER_HAS_LEFT = 1 << 2;
-  static constexpr int32 CHANNEL_FLAG_IS_BROADCAST = 1 << 5;
-  static constexpr int32 CHANNEL_FLAG_HAS_USERNAME = 1 << 6;
-  static constexpr int32 CHANNEL_FLAG_IS_VERIFIED = 1 << 7;
-  static constexpr int32 CHANNEL_FLAG_IS_MEGAGROUP = 1 << 8;
-  static constexpr int32 CHANNEL_FLAG_IS_RESTRICTED = 1 << 9;
-  // static constexpr int32 CHANNEL_FLAG_ANYONE_CAN_INVITE = 1 << 10;
-  static constexpr int32 CHANNEL_FLAG_SIGN_MESSAGES = 1 << 11;
-  static constexpr int32 CHANNEL_FLAG_IS_MIN = 1 << 12;
-  static constexpr int32 CHANNEL_FLAG_HAS_ACCESS_HASH = 1 << 13;
-  static constexpr int32 CHANNEL_FLAG_HAS_ADMIN_RIGHTS = 1 << 14;
-  static constexpr int32 CHANNEL_FLAG_HAS_BANNED_RIGHTS = 1 << 15;
-  static constexpr int32 CHANNEL_FLAG_HAS_UNBAN_DATE = 1 << 16;
-  static constexpr int32 CHANNEL_FLAG_HAS_PARTICIPANT_COUNT = 1 << 17;
-  static constexpr int32 CHANNEL_FLAG_IS_SCAM = 1 << 19;
-  static constexpr int32 CHANNEL_FLAG_HAS_LINKED_CHAT = 1 << 20;
-  static constexpr int32 CHANNEL_FLAG_HAS_LOCATION = 1 << 21;
-  static constexpr int32 CHANNEL_FLAG_IS_SLOW_MODE_ENABLED = 1 << 22;
-  static constexpr int32 CHANNEL_FLAG_HAS_ACTIVE_GROUP_CALL = 1 << 23;
-  static constexpr int32 CHANNEL_FLAG_IS_GROUP_CALL_NON_EMPTY = 1 << 24;
-  static constexpr int32 CHANNEL_FLAG_IS_FAKE = 1 << 25;
-  static constexpr int32 CHANNEL_FLAG_IS_GIGAGROUP = 1 << 26;
-  static constexpr int32 CHANNEL_FLAG_NOFORWARDS = 1 << 27;
-  static constexpr int32 CHANNEL_FLAG_JOIN_TO_SEND = 1 << 28;
-  static constexpr int32 CHANNEL_FLAG_JOIN_REQUEST = 1 << 29;
-  static constexpr int32 CHANNEL_FLAG_IS_FORUM = 1 << 30;
-  static constexpr int32 CHANNEL_FLAG_HAS_USERNAMES = 1 << 0;
 
   static constexpr int32 CHANNEL_FULL_EXPIRE_TIME = 60;
 

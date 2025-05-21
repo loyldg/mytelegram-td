@@ -274,12 +274,8 @@ class GetBoostsListQuery final : public Td::ResultHandler {
     dialog_id_ = dialog_id;
     auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id_, AccessRights::Read);
     CHECK(input_peer != nullptr);
-    int32 flags = 0;
-    if (only_gift_codes) {
-      flags |= telegram_api::premium_getBoostsList::GIFTS_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::premium_getBoostsList(flags, false /*ignored*/, std::move(input_peer), offset, limit)));
+        telegram_api::premium_getBoostsList(0, only_gift_codes, std::move(input_peer), offset, limit)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -381,14 +377,15 @@ td_api::object_ptr<td_api::chatBoostLevelFeatures> BoostManager::get_chat_boost_
   auto can_set_emoji_status = have_enough_boost_level("emoji_status");
   auto can_set_custom_background = have_enough_boost_level("custom_wallpaper");
   auto can_set_custom_emoji_sticker_set = have_enough_boost_level("emoji_stickers");
+  auto can_enable_autotranslation = have_enough_boost_level("autotranslation");
   auto can_recognize_speech = have_enough_boost_level("transcribe");
   auto can_restrict_sponsored_messages = have_enough_boost_level("restrict_sponsored");
   return td_api::make_object<td_api::chatBoostLevelFeatures>(
       level, actual_level, for_megagroup ? 0 : actual_level, theme_counts.title_color_count_,
       theme_counts.profile_accent_color_count_, can_set_profile_background_custom_emoji,
       theme_counts.accent_color_count_, can_set_background_custom_emoji, can_set_emoji_status,
-      theme_counts.chat_theme_count_, can_set_custom_background, can_set_custom_emoji_sticker_set, can_recognize_speech,
-      can_restrict_sponsored_messages);
+      theme_counts.chat_theme_count_, can_set_custom_background, can_set_custom_emoji_sticker_set,
+      can_enable_autotranslation, can_recognize_speech, can_restrict_sponsored_messages);
 }
 
 td_api::object_ptr<td_api::chatBoostFeatures> BoostManager::get_chat_boost_features_object(bool for_megagroup) const {
@@ -404,7 +401,7 @@ td_api::object_ptr<td_api::chatBoostFeatures> BoostManager::get_chat_boost_featu
   auto result = td_api::make_object<td_api::chatBoostFeatures>(
       Auto(), get_min_boost_level("profile_bg_icon"), get_min_boost_level("bg_icon"),
       get_min_boost_level("emoji_status"), get_min_boost_level("wallpaper"), get_min_boost_level("custom_wallpaper"),
-      get_min_boost_level("emoji_stickers"), get_min_boost_level("transcribe"),
+      get_min_boost_level("emoji_stickers"), get_min_boost_level("autotranslation"), get_min_boost_level("transcribe"),
       get_min_boost_level("restrict_sponsored"));
   for (int32 level = 1; level <= 10; level++) {
     result->features_.push_back(get_chat_boost_level_features_object(for_megagroup, level));

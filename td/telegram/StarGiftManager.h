@@ -6,6 +6,7 @@
 //
 #pragma once
 
+#include "td/telegram/BusinessConnectionId.h"
 #include "td/telegram/DialogId.h"
 #include "td/telegram/MessageFullId.h"
 #include "td/telegram/StarGiftId.h"
@@ -37,14 +38,14 @@ class StarGiftManager final : public Actor {
   StarGiftManager &operator=(StarGiftManager &&) = delete;
   ~StarGiftManager() final;
 
-  void get_gift_payment_options(Promise<td_api::object_ptr<td_api::gifts>> &&promise);
+  void get_gift_payment_options(Promise<td_api::object_ptr<td_api::availableGifts>> &&promise);
 
   void on_get_star_gift(const StarGift &star_gift, bool from_server);
 
   void send_gift(int64 gift_id, DialogId dialog_id, td_api::object_ptr<td_api::formattedText> text, bool is_private,
                  bool pay_for_upgrade, Promise<Unit> &&promise);
 
-  void convert_gift(StarGiftId star_gift_id, Promise<Unit> &&promise);
+  void convert_gift(BusinessConnectionId business_connection_id, StarGiftId star_gift_id, Promise<Unit> &&promise);
 
   void save_gift(StarGiftId star_gift_id, bool is_saved, Promise<Unit> &&promise);
 
@@ -54,20 +55,32 @@ class StarGiftManager final : public Actor {
 
   void get_gift_upgrade_preview(int64 gift_id, Promise<td_api::object_ptr<td_api::giftUpgradePreview>> &&promise);
 
-  void upgrade_gift(StarGiftId star_gift_id, bool keep_original_details, int64 star_count,
-                    Promise<td_api::object_ptr<td_api::upgradeGiftResult>> &&promise);
+  void upgrade_gift(BusinessConnectionId business_connection_id, StarGiftId star_gift_id, bool keep_original_details,
+                    int64 star_count, Promise<td_api::object_ptr<td_api::upgradeGiftResult>> &&promise);
 
-  void transfer_gift(StarGiftId star_gift_id, DialogId receiver_dialog_id, int64 star_count, Promise<Unit> &&promise);
+  void transfer_gift(BusinessConnectionId business_connection_id, StarGiftId star_gift_id, DialogId receiver_dialog_id,
+                     int64 star_count, Promise<Unit> &&promise);
 
-  void get_saved_star_gifts(DialogId dialog_id, bool exclude_unsaved, bool exclude_saved, bool exclude_unlimited,
-                            bool exclude_limited, bool exclude_unique, bool sort_by_value, const string &offset,
-                            int32 limit, Promise<td_api::object_ptr<td_api::receivedGifts>> &&promise);
+  void send_resold_gift(const string &gift_name, DialogId receiver_dialog_id, int64 star_count,
+                        Promise<Unit> &&promise);
+
+  void get_saved_star_gifts(BusinessConnectionId business_connection_id, DialogId dialog_id, bool exclude_unsaved,
+                            bool exclude_saved, bool exclude_unlimited, bool exclude_limited, bool exclude_unique,
+                            bool sort_by_value, const string &offset, int32 limit,
+                            Promise<td_api::object_ptr<td_api::receivedGifts>> &&promise);
 
   void get_saved_star_gift(StarGiftId star_gift_id, Promise<td_api::object_ptr<td_api::receivedGift>> &&promise);
 
   void get_upgraded_gift(const string &name, Promise<td_api::object_ptr<td_api::upgradedGift>> &&promise);
 
   void get_star_gift_withdrawal_url(StarGiftId star_gift_id, const string &password, Promise<string> &&promise);
+
+  void set_star_gift_price(StarGiftId star_gift_id, int64 resale_star_count, Promise<Unit> &&promise);
+
+  void get_resale_star_gifts(int64 gift_id, const td_api::object_ptr<td_api::GiftForResaleOrder> &order,
+                             const vector<td_api::object_ptr<td_api::UpgradedGiftAttributeId>> &attributes,
+                             const string &offset, int32 limit,
+                             Promise<td_api::object_ptr<td_api::giftsForResale>> &&promise);
 
   void register_gift(MessageFullId message_full_id, const char *source);
 

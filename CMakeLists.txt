@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
-project(TDLib VERSION 1.8.46 LANGUAGES CXX C)
+project(TDLib VERSION 1.8.49 LANGUAGES CXX C)
 
 if (NOT DEFINED CMAKE_MODULE_PATH)
   set(CMAKE_MODULE_PATH "")
@@ -32,6 +32,7 @@ option(TD_ENABLE_DOTNET "Use \"ON\" to enable generation of C++/CLI or C++/CX TD
 if (NOT CMAKE_CROSSCOMPILING)
   option(TD_GENERATE_SOURCE_FILES "Use \"ON\" to just generate TDLib source files.")
 endif()
+option(TD_E2E_ONLY "Use \"ON\" to build and install tde2e instead of TDLib.")
 
 include(CTest)
 
@@ -174,9 +175,9 @@ if (NOT CMAKE_CROSSCOMPILING)
   endif()
 endif()
 
-if (NOT OPENSSL_FOUND)
+if (NOT OPENSSL_FOUND OR TD_GENERATE_SOURCE_FILES)
   if (NOT TD_GENERATE_SOURCE_FILES)
-    message(WARNING "Can't find OpenSSL: stop TDLib building")
+    message(WARNING "Can't find OpenSSL: stop building")
   endif()
   return()
 endif()
@@ -185,7 +186,34 @@ if (NOT ZLIB_FOUND)
   find_package(ZLIB)
 endif()
 if (NOT ZLIB_FOUND)
-  message(WARNING "Can't find zlib: stop TDLib building")
+  message(WARNING "Can't find zlib: stop building")
+  return()
+endif()
+
+set(TDE2E_ENABLE_INSTALL ${TD_INSTALL_STATIC_LIBRARIES} CACHE BOOL "" FORCE)
+set(TDE2E_INSTALL_INCLUDES ${TD_E2E_ONLY} CACHE BOOL "" FORCE)
+add_subdirectory(tde2e)
+
+if (TD_E2E_ONLY)
+  if (TD_INSTALL_STATIC_LIBRARIES)
+    include(GeneratePkgConfig)
+    generate_pkgconfig(tdutils "Telegram Library - Utils")
+    generate_pkgconfig(tde2e "Telegram Library - E2E")
+    install(EXPORT TdStaticTargets
+      FILE tde2eStaticTargets.cmake
+      NAMESPACE tde2e::
+      DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/tde2e"
+    )
+  endif()
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/tde2eConfig.cmake" "include(\"\${CMAKE_CURRENT_LIST_DIR}/tde2eStaticTargets.cmake\")\n")
+  include(CMakePackageConfigHelpers)
+  write_basic_package_version_file("tde2eConfigVersion.cmake"
+    VERSION "${TDLib_VERSION}"
+    COMPATIBILITY ExactVersion
+  )
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/tde2eConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/tde2eConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/tde2e"
+  )
   return()
 endif()
 
@@ -347,6 +375,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/BusinessAwayMessage.cpp
   td/telegram/BusinessAwayMessageSchedule.cpp
   td/telegram/BusinessBotManageBar.cpp
+  td/telegram/BusinessBotRights.cpp
   td/telegram/BusinessChatLink.cpp
   td/telegram/BusinessConnectedBot.cpp
   td/telegram/BusinessConnectionManager.cpp
@@ -395,6 +424,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/DialogParticipantManager.cpp
   td/telegram/DialogSource.cpp
   td/telegram/Dimensions.cpp
+  td/telegram/DisallowedGiftsSettings.cpp
   td/telegram/Document.cpp
   td/telegram/DocumentsManager.cpp
   td/telegram/DownloadManager.cpp
@@ -437,6 +467,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/GiveawayParameters.cpp
   td/telegram/Global.cpp
   td/telegram/GlobalPrivacySettings.cpp
+  td/telegram/GroupCallJoinParameters.cpp
   td/telegram/GroupCallManager.cpp
   td/telegram/GroupCallParticipant.cpp
   td/telegram/GroupCallParticipantOrder.cpp
@@ -446,6 +477,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/InlineQueriesManager.cpp
   td/telegram/InputBusinessChatLink.cpp
   td/telegram/InputDialogId.cpp
+  td/telegram/InputGroupCall.cpp
   td/telegram/InputGroupCallId.cpp
   td/telegram/InputInvoice.cpp
   td/telegram/InputMessageText.cpp
@@ -572,8 +604,10 @@ set(TDLIB_SOURCE_PART2
   td/telegram/StarAmount.cpp
   td/telegram/StarGift.cpp
   td/telegram/StarGiftAttribute.cpp
+  td/telegram/StarGiftAttributeId.cpp
   td/telegram/StarGiftId.cpp
   td/telegram/StarGiftManager.cpp
+  td/telegram/StarGiftSettings.cpp
   td/telegram/StarManager.cpp
   td/telegram/StarSubscription.cpp
   td/telegram/StarSubscriptionPricing.cpp
@@ -661,6 +695,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/BusinessAwayMessage.h
   td/telegram/BusinessAwayMessageSchedule.h
   td/telegram/BusinessBotManageBar.h
+  td/telegram/BusinessBotRights.h
   td/telegram/BusinessChatLink.h
   td/telegram/BusinessConnectedBot.h
   td/telegram/BusinessConnectionId.h
@@ -722,6 +757,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/DialogParticipantManager.h
   td/telegram/DialogSource.h
   td/telegram/Dimensions.h
+  td/telegram/DisallowedGiftsSettings.h
   td/telegram/Document.h
   td/telegram/DocumentsManager.h
   td/telegram/DownloadManager.h
@@ -774,6 +810,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/GiveawayParameters.h
   td/telegram/Global.h
   td/telegram/GlobalPrivacySettings.h
+  td/telegram/GroupCallJoinParameters.h
   td/telegram/GroupCallId.h
   td/telegram/GroupCallManager.h
   td/telegram/GroupCallParticipant.h
@@ -784,6 +821,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/InlineQueriesManager.h
   td/telegram/InputBusinessChatLink.h
   td/telegram/InputDialogId.h
+  td/telegram/InputGroupCall.h
   td/telegram/InputGroupCallId.h
   td/telegram/InputInvoice.h
   td/telegram/InputMessageText.h
@@ -945,8 +983,10 @@ set(TDLIB_SOURCE_PART2
   td/telegram/StarAmount.h
   td/telegram/StarGift.h
   td/telegram/StarGiftAttribute.h
+  td/telegram/StarGiftAttributeId.h
   td/telegram/StarGiftId.h
   td/telegram/StarGiftManager.h
+  td/telegram/StarGiftSettings.h
   td/telegram/StarManager.h
   td/telegram/StarSubscription.h
   td/telegram/StarSubscriptionPricing.h
@@ -1021,6 +1061,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/BotVerifierSettings.hpp
   td/telegram/BusinessAwayMessage.hpp
   td/telegram/BusinessAwayMessageSchedule.hpp
+  td/telegram/BusinessBotRights.hpp
   td/telegram/BusinessConnectedBot.hpp
   td/telegram/BusinessGreetingMessage.hpp
   td/telegram/BusinessInfo.hpp
@@ -1032,6 +1073,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/DialogInviteLink.hpp
   td/telegram/DialogNotificationSettings.hpp
   td/telegram/Dimensions.hpp
+  td/telegram/DisallowedGiftsSettings.hpp
   td/telegram/Document.hpp
   td/telegram/DocumentsManager.hpp
   td/telegram/DraftMessage.hpp
@@ -1090,6 +1132,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/StarGift.hpp
   td/telegram/StarGiftAttribute.hpp
   td/telegram/StarGiftId.hpp
+  td/telegram/StarGiftSettings.hpp
   td/telegram/StarSubscriptionPricing.hpp
   td/telegram/StickerMaskPosition.hpp
   td/telegram/StickerPhotoSize.hpp
@@ -1160,7 +1203,7 @@ if (TD_ENABLE_JNI AND NOT ANDROID) # jni is available by default on Android
     find_package(JNI REQUIRED COMPONENTS JVM)
   endif()
   message(STATUS "Found JNI: ${JNI_INCLUDE_DIRS} ${JNI_LIBRARIES}")
-  target_include_directories(tdapi PUBLIC ${JAVA_INCLUDE_PATH} ${JAVA_INCLUDE_PATH2})
+  target_include_directories(tdapi SYSTEM PUBLIC ${JAVA_INCLUDE_PATH} ${JAVA_INCLUDE_PATH2})
   target_link_libraries(tdapi PUBLIC ${JAVA_JVM_LIBRARY})
 endif()
 
@@ -1187,11 +1230,11 @@ endif()
 if (MSVC AND TD_ENABLE_LTO)
   add_library(tdcore_part1 STATIC ${TDLIB_SOURCE_PART1})
   target_include_directories(tdcore_part1 PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
-  target_link_libraries(tdcore_part1 PUBLIC tdapi tdnet tddb tdactor tdutils PRIVATE tdmtproto)
+  target_link_libraries(tdcore_part1 PUBLIC tdapi tdnet tddb tdactor tde2e tdutils PRIVATE tdmtproto)
 
   add_library(tdcore_part2 STATIC ${TDLIB_SOURCE_PART2})
   target_include_directories(tdcore_part2 PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
-  target_link_libraries(tdcore_part2 PUBLIC tdapi tdnet tddb tdactor tdutils PRIVATE tdmtproto)
+  target_link_libraries(tdcore_part2 PUBLIC tdapi tdnet tddb tdactor tde2e tdutils PRIVATE tdmtproto)
 
   add_library(tdcore INTERFACE)
   target_link_libraries(tdcore INTERFACE tdcore_part1 tdcore_part2)
@@ -1200,7 +1243,7 @@ if (MSVC AND TD_ENABLE_LTO)
 else()
   add_library(tdcore STATIC ${TDLIB_SOURCE})
   target_include_directories(tdcore PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
-  target_link_libraries(tdcore PUBLIC tdapi tdnet tddb tdactor tdutils PRIVATE tdmtproto)
+  target_link_libraries(tdcore PUBLIC tdapi tdnet tddb tdactor tde2e tdutils PRIVATE tdmtproto)
 
   set(TD_CORE_PART_TARGETS)
 endif()
@@ -1216,9 +1259,7 @@ if (NOT CMAKE_CROSSCOMPILING)
 endif()
 
 add_library(tdclient STATIC td/telegram/Client.cpp td/telegram/Client.h td/telegram/Log.cpp td/telegram/Log.h)
-target_include_directories(tdclient PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-)
+target_include_directories(tdclient PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 target_link_libraries(tdclient PUBLIC tdapi PRIVATE tdcore)
 
 if (TD_ENABLE_DOTNET)
@@ -1229,9 +1270,7 @@ if (TD_ENABLE_DOTNET)
   )
   set_target_properties(tddotnet PROPERTIES OUTPUT_NAME Telegram.Td)
   target_link_libraries(tddotnet PRIVATE tdclient tdutils)
-  target_include_directories(tddotnet PUBLIC
-    $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>
-  )
+  target_include_directories(tddotnet PUBLIC $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
   if (NOT CMAKE_CROSSCOMPILING)
     add_dependencies(tddotnet generate_dotnet_api)
   endif()
@@ -1248,18 +1287,14 @@ endif()
 
 # tdc - TDLib interface in pure C
 add_library(tdc STATIC EXCLUDE_FROM_ALL ${TL_C_SCHEME_SOURCE} td/telegram/td_c_client.cpp td/telegram/td_c_client.h)
-target_include_directories(tdc PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-  $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
+target_include_directories(tdc PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
 target_link_libraries(tdc PRIVATE tdclient tdutils)
 if (NOT CMAKE_CROSSCOMPILING)
   add_dependencies(tdc tl_generate_c)
 endif()
 
 add_library(tdjson_private STATIC ${TL_TD_JSON_SOURCE} td/telegram/ClientJson.cpp td/telegram/ClientJson.h)
-target_include_directories(tdjson_private PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-  $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
+target_include_directories(tdjson_private PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<BUILD_INTERFACE:${TL_TD_AUTO_INCLUDE_DIR}>)
 target_link_libraries(tdjson_private PUBLIC tdclient tdutils)
 if (NOT CMAKE_CROSSCOMPILING)
   add_dependencies(tdjson_private tl_generate_common tl_generate_json)
@@ -1276,9 +1311,7 @@ include(GenerateExportHeader)
 add_library(tdjson SHARED ${TD_JSON_SOURCE} ${TD_JSON_HEADERS})
 target_link_libraries(tdjson PRIVATE tdjson_private)
 generate_export_header(tdjson EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/td/telegram/tdjson_export.h)
-target_include_directories(tdjson PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
+target_include_directories(tdjson PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 if (APPLE)
   set_target_properties(tdjson PROPERTIES LINK_FLAGS "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/tdclientjson_export_list")
 endif()
@@ -1286,9 +1319,7 @@ endif()
 add_library(tdjson_static STATIC ${TD_JSON_SOURCE} ${TD_JSON_HEADERS})
 target_link_libraries(tdjson_static PRIVATE tdjson_private)
 target_compile_definitions(tdjson_static PUBLIC TDJSON_STATIC_DEFINE)
-target_include_directories(tdjson_static PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
+target_include_directories(tdjson_static PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
 # EXECUTABLES
 if (EMSCRIPTEN)
@@ -1368,6 +1399,7 @@ include(GeneratePkgConfig)
 if (TD_INSTALL_STATIC_LIBRARIES)
   generate_pkgconfig(tdutils "Telegram Library - Utils")
   generate_pkgconfig(tdactor "Telegram Library - Actor")
+  generate_pkgconfig(tde2e "Telegram Library - E2E")
   generate_pkgconfig(tdnet "Telegram Library - Net")
   generate_pkgconfig(tdsqlite "Telegram Library - SQLite")
   generate_pkgconfig(tddb "Telegram Library - Database")
