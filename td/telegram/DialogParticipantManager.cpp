@@ -104,7 +104,7 @@ class GetChatJoinRequestsQuery final : public Td::ResultHandler {
       r_input_user = make_tl_object<telegram_api::inputUserEmpty>();
     }
 
-    int32 flags = telegram_api::messages_getChatInviteImporters::REQUESTED_MASK;
+    int32 flags = 0;
     if (!invite_link.empty()) {
       flags |= telegram_api::messages_getChatInviteImporters::LINK_MASK;
     }
@@ -112,8 +112,7 @@ class GetChatJoinRequestsQuery final : public Td::ResultHandler {
       flags |= telegram_api::messages_getChatInviteImporters::Q_MASK;
     }
     send_query(G()->net_query_creator().create(telegram_api::messages_getChatInviteImporters(
-        flags, false /*ignored*/, false /*ignored*/, std::move(input_peer), invite_link, query, offset_date,
-        r_input_user.move_as_ok(), limit)));
+        flags, true, false, std::move(input_peer), invite_link, query, offset_date, r_input_user.move_as_ok(), limit)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -176,12 +175,8 @@ class HideChatJoinRequestQuery final : public Td::ResultHandler {
 
     TRY_RESULT_PROMISE(promise_, input_user, td_->user_manager_->get_input_user(user_id));
 
-    int32 flags = 0;
-    if (approve) {
-      flags |= telegram_api::messages_hideChatJoinRequest::APPROVED_MASK;
-    }
-    send_query(G()->net_query_creator().create(telegram_api::messages_hideChatJoinRequest(
-        flags, false /*ignored*/, std::move(input_peer), std::move(input_user))));
+    send_query(G()->net_query_creator().create(
+        telegram_api::messages_hideChatJoinRequest(0, approve, std::move(input_peer), std::move(input_user))));
   }
 
   void on_result(BufferSlice packet) final {
@@ -215,14 +210,11 @@ class HideAllChatJoinRequestsQuery final : public Td::ResultHandler {
     CHECK(input_peer != nullptr);
 
     int32 flags = 0;
-    if (approve) {
-      flags |= telegram_api::messages_hideAllChatJoinRequests::APPROVED_MASK;
-    }
     if (!invite_link.empty()) {
       flags |= telegram_api::messages_hideAllChatJoinRequests::LINK_MASK;
     }
     send_query(G()->net_query_creator().create(
-        telegram_api::messages_hideAllChatJoinRequests(flags, false /*ignored*/, std::move(input_peer), invite_link)));
+        telegram_api::messages_hideAllChatJoinRequests(flags, approve, std::move(input_peer), invite_link)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -501,12 +493,8 @@ class DeleteChatUserQuery final : public Td::ResultHandler {
   }
 
   void send(ChatId chat_id, tl_object_ptr<telegram_api::InputUser> &&input_user, bool revoke_messages) {
-    int32 flags = 0;
-    if (revoke_messages) {
-      flags |= telegram_api::messages_deleteChatUser::REVOKE_HISTORY_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::messages_deleteChatUser(flags, false /*ignored*/, chat_id.get(), std::move(input_user))));
+        telegram_api::messages_deleteChatUser(0, revoke_messages, chat_id.get(), std::move(input_user))));
   }
 
   void on_result(BufferSlice packet) final {
@@ -1227,7 +1215,11 @@ void DialogParticipantManager::get_dialog_administrators(
     case DialogType::SecretChat:
       return promise.set_value(td_api::make_object<td_api::chatAdministrators>());
     case DialogType::Chat:
+      break;
     case DialogType::Channel:
+      if (td_->dialog_manager_->is_monoforum_channel(dialog_id)) {
+        return promise.set_value(td_api::make_object<td_api::chatAdministrators>());
+      }
       break;
     case DialogType::None:
     default:
@@ -1345,8 +1337,9 @@ void DialogParticipantManager::reload_dialog_administrators(
     DialogId dialog_id, const vector<DialogAdministrator> &dialog_administrators,
     Promise<td_api::object_ptr<td_api::chatAdministrators>> &&promise) {
   auto dialog_type = dialog_id.get_type();
-  if (dialog_type == DialogType::Chat &&
-      !td_->chat_manager_->get_chat_permissions(dialog_id.get_chat_id()).is_member()) {
+  if (td_->dialog_manager_->is_monoforum_channel(dialog_id) ||
+      (dialog_type == DialogType::Chat &&
+       !td_->chat_manager_->get_chat_permissions(dialog_id.get_chat_id()).is_member())) {
     return promise.set_value(td_api::make_object<td_api::chatAdministrators>());
   }
   auto query_promise = PromiseCreator::lambda(
@@ -1819,8 +1812,9 @@ void DialogParticipantManager::get_channel_participants(ChannelId channel_id,
     return promise.set_error(Status::Error(400, "Parameter offset must be non-negative"));
   }
 
-  if (td_->chat_manager_->is_broadcast_channel(channel_id) &&
-      !td_->chat_manager_->get_channel_status(channel_id).is_administrator()) {
+  if (td_->chat_manager_->is_monoforum_channel(channel_id) ||
+      (td_->chat_manager_->is_broadcast_channel(channel_id) &&
+       !td_->chat_manager_->get_channel_status(channel_id).is_administrator())) {
     return promise.set_error(Status::Error(400, "Member list is inaccessible"));
   }
 
@@ -2360,6 +2354,10 @@ void DialogParticipantManager::add_channel_participant(
 
   if (user_id == td_->user_manager_->get_my_id()) {
     // join the channel
+    if (td_->chat_manager_->is_monoforum_channel(channel_id) &&
+        !td_->chat_manager_->is_admined_monoforum_channel(channel_id)) {
+      return promise.set_error(Status::Error(400, "The chat can't be joined explicitly; send a message instead"));
+    }
     auto my_status = td_->chat_manager_->get_channel_status(channel_id);
     if (my_status.is_banned()) {
       return promise.set_error(Status::Error(400, "Can't return to kicked from chat"));
@@ -2387,6 +2385,9 @@ void DialogParticipantManager::add_channel_participant(
       td_->create_handler<JoinChannelQuery>(std::move(query_promise))->send(channel_id);
     }
     return;
+  }
+  if (td_->chat_manager_->is_monoforum_channel(channel_id)) {
+    return promise.set_error(Status::Error(400, "Members can't be added to the chat explicitly"));
   }
 
   if (!td_->chat_manager_->get_channel_permissions(channel_id).can_invite_users()) {
@@ -2433,7 +2434,8 @@ void DialogParticipantManager::add_channel_participants(
     return promise.set_error(Status::Error(400, "Chat info not found"));
   }
 
-  if (!td_->chat_manager_->get_channel_permissions(channel_id).can_invite_users()) {
+  if (!td_->chat_manager_->get_channel_permissions(channel_id).can_invite_users() ||
+      td_->chat_manager_->is_monoforum_channel(channel_id)) {
     return promise.set_error(Status::Error(400, "Not enough rights to invite members to the supergroup chat"));
   }
 
@@ -2512,6 +2514,9 @@ void DialogParticipantManager::set_channel_participant_status_impl(ChannelId cha
   bool need_promote = false;
   bool need_restrict = false;
   if (new_status.is_creator() || old_status.is_creator()) {
+    if (td_->chat_manager_->is_monoforum_channel(channel_id)) {
+      return promise.set_error(Status::Error(400, "Can't edit chat owner"));
+    }
     if (!old_status.is_creator()) {
       return promise.set_error(Status::Error(400, "Can't add another owner to the chat"));
     }
@@ -2590,6 +2595,9 @@ void DialogParticipantManager::promote_channel_participant(ChannelId channel_id,
                                                            const DialogParticipantStatus &old_status,
                                                            Promise<Unit> &&promise) {
   LOG(INFO) << "Promote " << user_id << " in " << channel_id << " from " << old_status << " to " << new_status;
+  if (td_->chat_manager_->is_monoforum_channel(channel_id)) {
+    return promise.set_error(Status::Error(400, "Can't promote members in the chat"));
+  }
   if (user_id == td_->user_manager_->get_my_id()) {
     if (new_status.is_administrator()) {
       return promise.set_error(Status::Error(400, "Can't promote self"));
@@ -2669,6 +2677,10 @@ void DialogParticipantManager::restrict_channel_participant(ChannelId channel_id
   CHECK(!old_status.is_creator());
   CHECK(!new_status.is_creator());
 
+  if (td_->chat_manager_->is_monoforum_channel(channel_id)) {
+    return promise.set_error(Status::Error(
+        400, "Can't restrict members in the chat; users must be banned in the corresponding channel chat"));
+  }
   if (!td_->chat_manager_->get_channel_permissions(channel_id).can_restrict_members()) {
     return promise.set_error(Status::Error(400, "Not enough rights to restrict/unrestrict chat member"));
   }

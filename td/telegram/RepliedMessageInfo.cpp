@@ -291,8 +291,8 @@ td_api::object_ptr<td_api::messageReplyToMessage> RepliedMessageInfo::get_messag
 
   td_api::object_ptr<td_api::MessageContent> content;
   if (content_ != nullptr) {
-    content =
-        get_message_content_object(content_.get(), td, dialog_id, message_id, false, 0, false, true, -1, false, false);
+    content = get_message_content_object(content_.get(), td, dialog_id, message_id, false, dialog_id, 0, false, true,
+                                         -1, false, false);
     switch (content->get_id()) {
       case td_api::messageUnsupported::ID:
         content = nullptr;
@@ -315,7 +315,7 @@ td_api::object_ptr<td_api::messageReplyToMessage> RepliedMessageInfo::get_messag
                                                             std::move(origin), origin_date_, std::move(content));
 }
 
-MessageInputReplyTo RepliedMessageInfo::get_input_reply_to() const {
+MessageInputReplyTo RepliedMessageInfo::get_message_input_reply_to() const {
   CHECK(!is_external());
   if (message_id_.is_valid() || message_id_.is_valid_scheduled()) {
     return MessageInputReplyTo(message_id_, dialog_id_, quote_.clone(true));

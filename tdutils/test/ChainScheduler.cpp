@@ -109,7 +109,7 @@ TEST(ChainScheduler, Stress) {
   int ChainsN = 4;
 
   struct QueryWithParents {
-    TaskId task_id;
+    TaskId task_id = 0;
     QueryPtr id;
     td::vector<QueryPtr> parents;
   };
@@ -219,8 +219,8 @@ TEST(ChainScheduler, Stress) {
     flush_pending_queries();
     // LOG(INFO) << scheduler;
   }
-  LOG(INFO) << "Sent queries count " << sent_cnt;
-  LOG(INFO) << "Total queries " << current_query_id;
+  LOG(INFO) << "Sent number of queries: " << sent_cnt;
+  LOG(INFO) << "Total number of queries: " << current_query_id;
   for (auto &chain : chains) {
     int prev_ok = -1;
     int failed_cnt = 0;
