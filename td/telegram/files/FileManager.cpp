@@ -1894,7 +1894,7 @@ Result<FileId> FileManager::register_file(FileData &&data, FileLocationSource fi
           return std::move(status);
         }
       } else {
-        data.local_ = LocalFileLocation(std::move(r_info.ok().location_));
+        data.local_ = LocalFileLocation(std::move(r_info.ok_ref().location_));
         data.size_ = r_info.ok().size_;
       }
     } else {
@@ -2133,9 +2133,9 @@ static int merge_choose_name(Slice x, Slice y) {
   return 2;
 }
 
-static int merge_choose_owner(DialogId x, DialogId y) {
-  if (x.is_valid() != y.is_valid()) {
-    return x.is_valid() < y.is_valid();
+static int merge_choose_owner(DialogId x_owner_dialog_id, DialogId y_owner_dialog_id) {
+  if (x_owner_dialog_id.is_valid() != y_owner_dialog_id.is_valid()) {
+    return x_owner_dialog_id.is_valid() < y_owner_dialog_id.is_valid();
   }
   return 2;
 }
@@ -2837,8 +2837,7 @@ void FileManager::get_content(FileId file_id, Promise<BufferSlice> promise) {
   send_closure(file_load_manager_, &FileLoadManager::get_content, full_local_location->path_, std::move(promise));
 }
 
-void FileManager::read_file_part(FileId file_id, int64 offset, int64 count, int left_tries,
-                                 Promise<td_api::object_ptr<td_api::filePart>> promise) {
+void FileManager::read_file_part(FileId file_id, int64 offset, int64 count, int left_tries, Promise<string> promise) {
   TRY_STATUS_PROMISE(promise, G()->close_status());
 
   if (!file_id.is_valid()) {
@@ -2860,7 +2859,7 @@ void FileManager::read_file_part(FileId file_id, int64 offset, int64 count, int 
   if (count == 0) {
     count = file_view.downloaded_prefix(offset);
     if (count == 0) {
-      return promise.set_value(td_api::make_object<td_api::filePart>());
+      return promise.set_value(string());
     }
   } else if (file_view.downloaded_prefix(offset) < count) {
     // TODO this check is safer to do in another thread
@@ -2903,9 +2902,7 @@ void FileManager::read_file_part(FileId file_id, int64 offset, int64 count, int 
                                    }))
               .release();
         } else {
-          auto result = td_api::make_object<td_api::filePart>();
-          result->data_ = r_bytes.move_as_ok();
-          promise.set_value(std::move(result));
+          promise.set_value(r_bytes.move_as_ok());
         }
       });
   send_closure(file_load_manager_, &FileLoadManager::read_file_part, *path, offset, count,
@@ -3805,7 +3802,7 @@ void FileManager::run_upload(FileNodePtr node, vector<int> bad_parts) {
     auto generate_location = file_view.get_generate_location();
     if (generate_location != nullptr && generate_location->file_type_ == FileType::SecureEncrypted) {
       // Can't upload secure file before its size is known
-      LOG(INFO) << "Can't upload secure file " << node->main_file_id_ << " before it's size is known";
+      LOG(INFO) << "Can't upload secure file " << node->main_file_id_ << " before its size is known";
       return;
     }
   }

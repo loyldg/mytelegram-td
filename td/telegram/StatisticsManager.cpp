@@ -189,12 +189,8 @@ class GetMegagroupStatsQuery final : public Td::ResultHandler {
     auto input_channel = td_->chat_manager_->get_input_channel(channel_id);
     CHECK(input_channel != nullptr);
 
-    int32 flags = 0;
-    if (is_dark) {
-      flags |= telegram_api::stats_getMegagroupStats::DARK_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::stats_getMegagroupStats(flags, false /*ignored*/, std::move(input_channel)), {}, dc_id));
+        telegram_api::stats_getMegagroupStats(0, is_dark, std::move(input_channel)), {}, dc_id));
   }
 
   void on_result(BufferSlice packet) final {
@@ -227,12 +223,8 @@ class GetBroadcastStatsQuery final : public Td::ResultHandler {
     auto input_channel = td_->chat_manager_->get_input_channel(channel_id);
     CHECK(input_channel != nullptr);
 
-    int32 flags = 0;
-    if (is_dark) {
-      flags |= telegram_api::stats_getBroadcastStats::DARK_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::stats_getBroadcastStats(flags, false /*ignored*/, std::move(input_channel)), {}, dc_id));
+        telegram_api::stats_getBroadcastStats(0, is_dark, std::move(input_channel)), {}, dc_id));
   }
 
   void on_result(BufferSlice packet) final {
@@ -306,12 +298,8 @@ class GetBroadcastRevenueStatsQuery final : public Td::ResultHandler {
     auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id, AccessRights::Read);
     CHECK(input_peer != nullptr);
 
-    int32 flags = 0;
-    if (is_dark) {
-      flags |= telegram_api::stats_getBroadcastRevenueStats::DARK_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::stats_getBroadcastRevenueStats(flags, false /*ignored*/, std::move(input_peer))));
+        telegram_api::stats_getBroadcastRevenueStats(0, is_dark, std::move(input_peer))));
   }
 
   void on_result(BufferSlice packet) final {
@@ -475,14 +463,10 @@ class GetMessageStatsQuery final : public Td::ResultHandler {
       return promise_.set_error(Status::Error(400, "Supergroup not found"));
     }
 
-    int32 flags = 0;
-    if (is_dark) {
-      flags |= telegram_api::stats_getMessageStats::DARK_MASK;
-    }
-    send_query(G()->net_query_creator().create(
-        telegram_api::stats_getMessageStats(flags, false /*ignored*/, std::move(input_channel),
-                                            message_id.get_server_message_id().get()),
-        {}, dc_id));
+    send_query(
+        G()->net_query_creator().create(telegram_api::stats_getMessageStats(0, is_dark, std::move(input_channel),
+                                                                            message_id.get_server_message_id().get()),
+                                        {}, dc_id));
   }
 
   void on_result(BufferSlice packet) final {
@@ -523,12 +507,8 @@ class GetStoryStatsQuery final : public Td::ResultHandler {
       return promise_.set_error(Status::Error(400, "Chat not found"));
     }
 
-    int32 flags = 0;
-    if (is_dark) {
-      flags |= telegram_api::stats_getStoryStats::DARK_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::stats_getStoryStats(flags, false /*ignored*/, std::move(input_peer), story_id.get()), {}, dc_id));
+        telegram_api::stats_getStoryStats(0, is_dark, std::move(input_peer), story_id.get()), {}, dc_id));
   }
 
   void on_result(BufferSlice packet) final {
@@ -849,7 +829,7 @@ void StatisticsManager::send_get_message_public_forwards_query(
     return promise.set_error(Status::Error(400, "Message forwards are inaccessible"));
   }
 
-  static constexpr int32 MAX_MESSAGE_FORWARDS = 100;  // server side limit
+  static constexpr int32 MAX_MESSAGE_FORWARDS = 100;  // server-side limit
   if (limit > MAX_MESSAGE_FORWARDS) {
     limit = MAX_MESSAGE_FORWARDS;
   }
@@ -893,7 +873,7 @@ void StatisticsManager::send_get_story_public_forwards_query(
     return promise.set_error(Status::Error(400, "Story forwards are inaccessible"));
   }
 
-  static constexpr int32 MAX_STORY_FORWARDS = 100;  // server side limit
+  static constexpr int32 MAX_STORY_FORWARDS = 100;  // server-side limit
   if (limit > MAX_STORY_FORWARDS) {
     limit = MAX_STORY_FORWARDS;
   }
@@ -915,11 +895,9 @@ void StatisticsManager::on_get_public_forwards(
       case telegram_api::publicForwardMessage::ID: {
         auto forward = telegram_api::move_object_as<telegram_api::publicForwardMessage>(forward_ptr);
         auto dialog_id = DialogId::get_message_dialog_id(forward->message_);
-        auto message_full_id = td_->messages_manager_->on_get_message(std::move(forward->message_), false,
-                                                                      dialog_id.get_type() == DialogType::Channel,
-                                                                      false, "on_get_public_forwards");
+        auto message_full_id = td_->messages_manager_->on_get_message(dialog_id, std::move(forward->message_), false,
+                                                                      false, false, "on_get_public_forwards");
         if (message_full_id != MessageFullId()) {
-          CHECK(dialog_id == message_full_id.get_dialog_id());
           result.push_back(td_api::make_object<td_api::publicForwardMessage>(
               td_->messages_manager_->get_message_object(message_full_id, "on_get_public_forwards")));
           CHECK(result.back() != nullptr);
