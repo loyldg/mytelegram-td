@@ -14,6 +14,7 @@
 #include "td/telegram/ChatId.h"
 #include "td/telegram/ChatManager.h"
 #include "td/telegram/ChatReactions.h"
+#include "td/telegram/Dependencies.h"
 #include "td/telegram/FileReferenceManager.h"
 #include "td/telegram/files/FileManager.h"
 #include "td/telegram/files/FileType.h"
@@ -435,7 +436,7 @@ class ToggleNoForwardsQuery final : public Td::ResultHandler {
 class GetDialogUnreadMarksQuery final : public Td::ResultHandler {
  public:
   void send() {
-    send_query(G()->net_query_creator().create(telegram_api::messages_getDialogUnreadMarks()));
+    send_query(G()->net_query_creator().create(telegram_api::messages_getDialogUnreadMarks(0, nullptr)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -724,14 +725,8 @@ class GetBlockedDialogsQuery final : public Td::ResultHandler {
   void send(BlockListId block_list_id, int32 offset, int32 limit) {
     offset_ = offset;
     limit_ = limit;
-
-    int32 flags = 0;
-    if (block_list_id == BlockListId::stories()) {
-      flags |= telegram_api::contacts_getBlocked::MY_STORIES_FROM_MASK;
-    }
-
     send_query(G()->net_query_creator().create(
-        telegram_api::contacts_getBlocked(flags, false /*ignored*/, offset, limit), {{"me"}}));
+        telegram_api::contacts_getBlocked(0, block_list_id == BlockListId::stories(), offset, limit), {{"me"}}));
   }
 
   void on_result(BufferSlice packet) final {
@@ -783,11 +778,9 @@ class ReorderPinnedDialogsQuery final : public Td::ResultHandler {
 
   void send(FolderId folder_id, const vector<DialogId> &dialog_ids) {
     folder_id_ = folder_id;
-    int32 flags = telegram_api::messages_reorderPinnedDialogs::FORCE_MASK;
     send_query(G()->net_query_creator().create(
         telegram_api::messages_reorderPinnedDialogs(
-            flags, true /*ignored*/, folder_id.get(),
-            td_->dialog_manager_->get_input_dialog_peers(dialog_ids, AccessRights::Read)),
+            0, true, folder_id.get(), td_->dialog_manager_->get_input_dialog_peers(dialog_ids, AccessRights::Read)),
         {{folder_id_}}));
   }
 
@@ -1040,17 +1033,13 @@ class ToggleDialogIsBlockedQuery final : public Td::ResultHandler {
     auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id, AccessRights::Know);
     CHECK(input_peer != nullptr && input_peer->get_id() != telegram_api::inputPeerEmpty::ID);
 
-    int32 flags = 0;
-    if (is_blocked_for_stories) {
-      flags |= telegram_api::contacts_block::MY_STORIES_FROM_MASK;
-    }
     vector<ChainId> chain_ids{{dialog_id, MessageContentType::Photo}, {dialog_id, MessageContentType::Text}, {"me"}};
     auto query =
         is_blocked || is_blocked_for_stories
             ? G()->net_query_creator().create(
-                  telegram_api::contacts_block(flags, false /*ignored*/, std::move(input_peer)), std::move(chain_ids))
+                  telegram_api::contacts_block(0, is_blocked_for_stories, std::move(input_peer)), std::move(chain_ids))
             : G()->net_query_creator().create(
-                  telegram_api::contacts_unblock(flags, false /*ignored*/, std::move(input_peer)),
+                  telegram_api::contacts_unblock(0, is_blocked_for_stories, std::move(input_peer)),
                   std::move(chain_ids));
     send_query(std::move(query));
   }
@@ -1084,27 +1073,42 @@ class ToggleDialogIsBlockedQuery final : public Td::ResultHandler {
 class ToggleDialogUnreadMarkQuery final : public Td::ResultHandler {
   Promise<Unit> promise_;
   DialogId dialog_id_;
+  SavedMessagesTopicId saved_messages_topic_id_;
   bool is_marked_as_unread_;
 
  public:
   explicit ToggleDialogUnreadMarkQuery(Promise<Unit> &&promise) : promise_(std::move(promise)) {
   }
 
-  void send(DialogId dialog_id, bool is_marked_as_unread) {
+  void send(DialogId dialog_id, SavedMessagesTopicId saved_messages_topic_id, bool is_marked_as_unread) {
     dialog_id_ = dialog_id;
+    saved_messages_topic_id_ = saved_messages_topic_id;
     is_marked_as_unread_ = is_marked_as_unread;
 
-    auto input_peer = td_->dialog_manager_->get_input_dialog_peer(dialog_id, AccessRights::Read);
-    if (input_peer == nullptr) {
-      return on_error(Status::Error(400, "Can't access the chat"));
+    int32 flags = 0;
+    telegram_api::object_ptr<telegram_api::InputPeer> parent_input_peer;
+    telegram_api::object_ptr<telegram_api::InputDialogPeer> input_peer;
+    if (saved_messages_topic_id.is_valid()) {
+      parent_input_peer = td_->dialog_manager_->get_input_peer(dialog_id, AccessRights::Write);
+      if (parent_input_peer == nullptr) {
+        return on_error(Status::Error(400, "Can't access the chat"));
+      }
+      flags |= telegram_api::messages_markDialogUnread::PARENT_PEER_MASK;
+      input_peer = saved_messages_topic_id.get_input_dialog_peer(td_);
+      if (input_peer == nullptr) {
+        return on_error(Status::Error(400, "Can't access the topic"));
+      }
+    } else {
+      input_peer = td_->dialog_manager_->get_input_dialog_peer(dialog_id, AccessRights::Read);
+      if (input_peer == nullptr) {
+        return on_error(Status::Error(400, "Can't access the chat"));
+      }
     }
 
-    int32 flags = 0;
-    if (is_marked_as_unread) {
-      flags |= telegram_api::messages_markDialogUnread::UNREAD_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::messages_markDialogUnread(flags, false /*ignored*/, std::move(input_peer)), {{dialog_id}}));
+        telegram_api::messages_markDialogUnread(flags, is_marked_as_unread, std::move(parent_input_peer),
+                                                std::move(input_peer)),
+        {{dialog_id}}));
   }
 
   void on_result(BufferSlice packet) final {
@@ -1122,7 +1126,8 @@ class ToggleDialogUnreadMarkQuery final : public Td::ResultHandler {
   }
 
   void on_error(Status status) final {
-    if (!td_->dialog_manager_->on_get_dialog_error(dialog_id_, status, "ToggleDialogUnreadMarkQuery")) {
+    if (saved_messages_topic_id_.is_valid() ||
+        !td_->dialog_manager_->on_get_dialog_error(dialog_id_, status, "ToggleDialogUnreadMarkQuery")) {
       LOG(ERROR) << "Receive error for ToggleDialogUnreadMarkQuery: " << status;
     }
     if (!G()->close_flag()) {
@@ -1150,12 +1155,8 @@ class ToggleDialogPinQuery final : public Td::ResultHandler {
       return on_error(Status::Error(400, "Can't access the chat"));
     }
 
-    int32 flags = 0;
-    if (is_pinned) {
-      flags |= telegram_api::messages_toggleDialogPin::PINNED_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::messages_toggleDialogPin(flags, false /*ignored*/, std::move(input_peer)), {{dialog_id}}));
+        telegram_api::messages_toggleDialogPin(0, is_pinned, std::move(input_peer)), {{dialog_id}}));
   }
 
   void on_result(BufferSlice packet) final {
@@ -1200,12 +1201,8 @@ class ToggleDialogTranslationsQuery final : public Td::ResultHandler {
       return on_error(Status::Error(400, "Can't access the chat"));
     }
 
-    int32 flags = 0;
-    if (!is_translatable) {
-      flags |= telegram_api::messages_togglePeerTranslations::DISABLED_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::messages_togglePeerTranslations(flags, false /*ignored*/, std::move(input_peer)), {{dialog_id}}));
+        telegram_api::messages_togglePeerTranslations(0, !is_translatable, std::move(input_peer)), {{dialog_id}}));
   }
 
   void on_result(BufferSlice packet) final {
@@ -1578,7 +1575,7 @@ void DialogManager::reload_dialog_info(DialogId dialog_id, Promise<Unit> &&promi
     case DialogType::Channel:
       return td_->chat_manager_->reload_channel(dialog_id.get_channel_id(), std::move(promise), "reload_dialog_info");
     default:
-      return promise.set_error(Status::Error("Invalid chat identifier to reload"));
+      return promise.set_error("Invalid chat identifier to reload");
   }
 }
 
@@ -1601,7 +1598,7 @@ void DialogManager::get_dialog_info_full(DialogId dialog_id, Promise<Unit> &&pro
     case DialogType::None:
     default:
       UNREACHABLE();
-      return promise.set_error(Status::Error(500, "Wrong chat type"));
+      return promise.set_error(500, "Wrong chat type");
   }
 }
 
@@ -1707,15 +1704,15 @@ NotificationSettingsScope DialogManager::get_dialog_notification_setting_scope(D
 void DialogManager::migrate_dialog_to_megagroup(DialogId dialog_id,
                                                 Promise<td_api::object_ptr<td_api::chat>> &&promise) {
   if (!have_dialog_force(dialog_id, "migrate_dialog_to_megagroup")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
   if (dialog_id.get_type() != DialogType::Chat) {
-    return promise.set_error(Status::Error(400, "Only basic group chats can be converted to supergroup"));
+    return promise.set_error(400, "Only basic group chats can be converted to supergroup");
   }
 
   auto chat_id = dialog_id.get_chat_id();
   if (!td_->chat_manager_->get_chat_status(chat_id).is_creator()) {
-    return promise.set_error(Status::Error(400, "Need creator rights in the chat"));
+    return promise.set_error(400, "Need creator rights in the chat");
   }
   if (td_->chat_manager_->get_chat_migrated_to_channel_id(chat_id).is_valid()) {
     return on_migrate_chat_to_megagroup(chat_id, std::move(promise));
@@ -1735,11 +1732,11 @@ void DialogManager::on_migrate_chat_to_megagroup(ChatId chat_id, Promise<td_api:
   auto channel_id = td_->chat_manager_->get_chat_migrated_to_channel_id(chat_id);
   if (!channel_id.is_valid()) {
     LOG(ERROR) << "Can't find the supergroup to which the basic group has migrated";
-    return promise.set_error(Status::Error(500, "Supergroup not found"));
+    return promise.set_error(500, "Supergroup not found");
   }
   if (!td_->chat_manager_->have_channel(channel_id)) {
     LOG(ERROR) << "Can't find info about the supergroup to which the basic group has migrated";
-    return promise.set_error(Status::Error(500, "Supergroup info is not found"));
+    return promise.set_error(500, "Supergroup info is not found");
   }
 
   auto dialog_id = DialogId(channel_id);
@@ -1805,25 +1802,24 @@ std::pair<int32, vector<DialogId>> DialogManager::get_recently_opened_dialogs(in
 }
 
 bool DialogManager::is_anonymous_administrator(DialogId dialog_id, string *author_signature) const {
-  CHECK(dialog_id.is_valid());
-
-  if (is_broadcast_channel(dialog_id)) {
-    return true;
+  if (dialog_id.get_type() != DialogType::Channel) {
+    CHECK(dialog_id.is_valid());
+    return false;
   }
 
+  auto channel_id = dialog_id.get_channel_id();
+  if (td_->chat_manager_->is_broadcast_channel(channel_id) ||
+      td_->chat_manager_->is_admined_monoforum_channel(channel_id)) {
+    return true;
+  }
   if (td_->auth_manager_->is_bot()) {
     return false;
   }
 
-  if (dialog_id.get_type() != DialogType::Channel) {
-    return false;
-  }
-
-  auto status = td_->chat_manager_->get_channel_status(dialog_id.get_channel_id());
+  auto status = td_->chat_manager_->get_channel_status(channel_id);
   if (!status.is_anonymous()) {
     return false;
   }
-
   if (author_signature != nullptr) {
     *author_signature = status.get_rank();
   }
@@ -1846,6 +1842,21 @@ bool DialogManager::is_forum_channel(DialogId dialog_id) const {
          td_->chat_manager_->is_forum_channel(dialog_id.get_channel_id());
 }
 
+bool DialogManager::is_forum_tabs_channel(DialogId dialog_id) const {
+  return dialog_id.get_type() == DialogType::Channel &&
+         td_->chat_manager_->is_forum_tabs_channel(dialog_id.get_channel_id());
+}
+
+bool DialogManager::is_monoforum_channel(DialogId dialog_id) const {
+  return dialog_id.get_type() == DialogType::Channel &&
+         td_->chat_manager_->is_monoforum_channel(dialog_id.get_channel_id());
+}
+
+bool DialogManager::is_admined_monoforum_channel(DialogId dialog_id) const {
+  return dialog_id.get_type() == DialogType::Channel &&
+         td_->chat_manager_->is_admined_monoforum_channel(dialog_id.get_channel_id());
+}
+
 bool DialogManager::is_broadcast_channel(DialogId dialog_id) const {
   if (dialog_id.get_type() != DialogType::Channel) {
     return false;
@@ -1857,7 +1868,6 @@ bool DialogManager::is_broadcast_channel(DialogId dialog_id) const {
 bool DialogManager::on_get_dialog_error(DialogId dialog_id, const Status &status, const char *source) {
   auto message = status.message();
   if (message == CSlice("BOT_METHOD_INVALID")) {
-    LOG(ERROR) << "Receive BOT_METHOD_INVALID from " << source;
     return true;
   }
   if (G()->is_expected_error(status)) {
@@ -1891,7 +1901,7 @@ bool DialogManager::on_get_dialog_error(DialogId dialog_id, const Status &status
 
 void DialogManager::delete_dialog(DialogId dialog_id, Promise<Unit> &&promise) {
   if (!have_dialog_force(dialog_id, "delete_dialog")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
 
   switch (dialog_id.get_type()) {
@@ -2134,35 +2144,35 @@ bool DialogManager::is_dialog_action_unneeded(DialogId dialog_id) const {
 
 void DialogManager::set_dialog_title(DialogId dialog_id, const string &title, Promise<Unit> &&promise) {
   if (!have_dialog_force(dialog_id, "set_dialog_title")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
 
   auto new_title = clean_name(title, MAX_TITLE_LENGTH);
   if (new_title.empty()) {
-    return promise.set_error(Status::Error(400, "Title must be non-empty"));
+    return promise.set_error(400, "Title must be non-empty");
   }
 
   switch (dialog_id.get_type()) {
     case DialogType::User:
-      return promise.set_error(Status::Error(400, "Can't change private chat title"));
+      return promise.set_error(400, "Can't change private chat title");
     case DialogType::Chat: {
       auto chat_id = dialog_id.get_chat_id();
       auto status = td_->chat_manager_->get_chat_permissions(chat_id);
       if (!status.can_change_info_and_settings() ||
           (td_->auth_manager_->is_bot() && !td_->chat_manager_->is_appointed_chat_administrator(chat_id))) {
-        return promise.set_error(Status::Error(400, "Not enough rights to change chat title"));
+        return promise.set_error(400, "Not enough rights to change chat title");
       }
       break;
     }
     case DialogType::Channel: {
       auto status = td_->chat_manager_->get_channel_permissions(dialog_id.get_channel_id());
       if (!status.can_change_info_and_settings()) {
-        return promise.set_error(Status::Error(400, "Not enough rights to change chat title"));
+        return promise.set_error(400, "Not enough rights to change chat title");
       }
       break;
     }
     case DialogType::SecretChat:
-      return promise.set_error(Status::Error(400, "Can't change secret chat title"));
+      return promise.set_error(400, "Can't change secret chat title");
     case DialogType::None:
     default:
       UNREACHABLE();
@@ -2179,30 +2189,30 @@ void DialogManager::set_dialog_title(DialogId dialog_id, const string &title, Pr
 void DialogManager::set_dialog_photo(DialogId dialog_id, const td_api::object_ptr<td_api::InputChatPhoto> &input_photo,
                                      Promise<Unit> &&promise) {
   if (!have_dialog_force(dialog_id, "set_dialog_photo")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
 
   switch (dialog_id.get_type()) {
     case DialogType::User:
-      return promise.set_error(Status::Error(400, "Can't change private chat photo"));
+      return promise.set_error(400, "Can't change private chat photo");
     case DialogType::Chat: {
       auto chat_id = dialog_id.get_chat_id();
       auto status = td_->chat_manager_->get_chat_permissions(chat_id);
       if (!status.can_change_info_and_settings() ||
           (td_->auth_manager_->is_bot() && !td_->chat_manager_->is_appointed_chat_administrator(chat_id))) {
-        return promise.set_error(Status::Error(400, "Not enough rights to change chat photo"));
+        return promise.set_error(400, "Not enough rights to change chat photo");
       }
       break;
     }
     case DialogType::Channel: {
       auto status = td_->chat_manager_->get_channel_permissions(dialog_id.get_channel_id());
       if (!status.can_change_info_and_settings()) {
-        return promise.set_error(Status::Error(400, "Not enough rights to change chat photo"));
+        return promise.set_error(400, "Not enough rights to change chat photo");
       }
       break;
     }
     case DialogType::SecretChat:
-      return promise.set_error(Status::Error(400, "Can't change secret chat photo"));
+      return promise.set_error(400, "Can't change secret chat photo");
     case DialogType::None:
     default:
       UNREACHABLE();
@@ -2217,13 +2227,13 @@ void DialogManager::set_dialog_photo(DialogId dialog_id, const td_api::object_pt
         auto photo = static_cast<const td_api::inputChatPhotoPrevious *>(input_photo.get());
         auto file_id = td_->user_manager_->get_profile_photo_file_id(photo->chat_photo_id_);
         if (!file_id.is_valid()) {
-          return promise.set_error(Status::Error(400, "Unknown profile photo identifier specified"));
+          return promise.set_error(400, "Unknown profile photo identifier specified");
         }
 
         auto file_view = td_->file_manager_->get_file_view(file_id);
         const auto *main_remote_location = file_view.get_main_remote_location();
         if (main_remote_location == nullptr) {
-          return promise.set_error(Status::Error(400, "Invalid profile photo identifier specified"));
+          return promise.set_error(400, "Invalid profile photo identifier specified");
         }
         auto input_chat_photo =
             telegram_api::make_object<telegram_api::inputChatPhoto>(main_remote_location->as_input_photo());
@@ -2264,7 +2274,7 @@ void DialogManager::set_dialog_photo(DialogId dialog_id, const td_api::object_pt
 
   const double MAX_ANIMATION_DURATION = 10.0;
   if (main_frame_timestamp < 0.0 || main_frame_timestamp > MAX_ANIMATION_DURATION) {
-    return promise.set_error(Status::Error(400, "Wrong main frame timestamp specified"));
+    return promise.set_error(400, "Wrong main frame timestamp specified");
   }
 
   auto file_type = is_animation ? FileType::Animation : FileType::Photo;
@@ -2319,10 +2329,10 @@ void DialogManager::on_upload_dialog_photo(FileUploadId file_upload_id,
   const auto *main_remote_location = file_view.get_main_remote_location();
   if (input_file == nullptr && main_remote_location != nullptr) {
     if (main_remote_location->is_web()) {
-      return promise.set_error(Status::Error(400, "Can't use web photo as profile photo"));
+      return promise.set_error(400, "Can't use web photo as profile photo");
     }
     if (is_reupload) {
-      return promise.set_error(Status::Error(400, "Failed to reupload the file"));
+      return promise.set_error(400, "Failed to reupload the file");
     }
 
     if (is_animation) {
@@ -2382,7 +2392,7 @@ void DialogManager::on_upload_dialog_photo_error(FileUploadId file_upload_id, St
 void DialogManager::set_dialog_accent_color(DialogId dialog_id, AccentColorId accent_color_id,
                                             CustomEmojiId background_custom_emoji_id, Promise<Unit> &&promise) {
   if (!have_dialog_force(dialog_id, "set_dialog_accent_color")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
 
   switch (dialog_id.get_type()) {
@@ -2402,14 +2412,14 @@ void DialogManager::set_dialog_accent_color(DialogId dialog_id, AccentColorId ac
     default:
       UNREACHABLE();
   }
-  promise.set_error(Status::Error(400, "Can't change accent color in the chat"));
+  promise.set_error(400, "Can't change accent color in the chat");
 }
 
 void DialogManager::set_dialog_profile_accent_color(DialogId dialog_id, AccentColorId profile_accent_color_id,
                                                     CustomEmojiId profile_background_custom_emoji_id,
                                                     Promise<Unit> &&promise) {
   if (!have_dialog_force(dialog_id, "set_dialog_profile_accent_color")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
 
   switch (dialog_id.get_type()) {
@@ -2430,7 +2440,7 @@ void DialogManager::set_dialog_profile_accent_color(DialogId dialog_id, AccentCo
     default:
       UNREACHABLE();
   }
-  promise.set_error(Status::Error(400, "Can't change profile accent color in the chat"));
+  promise.set_error(400, "Can't change profile accent color in the chat");
 }
 
 void DialogManager::set_dialog_permissions(DialogId dialog_id,
@@ -2439,28 +2449,28 @@ void DialogManager::set_dialog_permissions(DialogId dialog_id,
   TRY_STATUS_PROMISE(promise, check_dialog_access(dialog_id, false, AccessRights::Write, "set_dialog_permissions"));
 
   if (permissions == nullptr) {
-    return promise.set_error(Status::Error(400, "New permissions must be non-empty"));
+    return promise.set_error(400, "New permissions must be non-empty");
   }
 
   ChannelType channel_type = ChannelType::Unknown;
   switch (dialog_id.get_type()) {
     case DialogType::User:
-      return promise.set_error(Status::Error(400, "Can't change private chat permissions"));
+      return promise.set_error(400, "Can't change private chat permissions");
     case DialogType::Chat: {
       auto chat_id = dialog_id.get_chat_id();
       auto status = td_->chat_manager_->get_chat_permissions(chat_id);
       if (!status.can_restrict_members()) {
-        return promise.set_error(Status::Error(400, "Not enough rights to change chat permissions"));
+        return promise.set_error(400, "Not enough rights to change chat permissions");
       }
       break;
     }
     case DialogType::Channel: {
       if (is_broadcast_channel(dialog_id)) {
-        return promise.set_error(Status::Error(400, "Can't change channel chat permissions"));
+        return promise.set_error(400, "Can't change channel chat permissions");
       }
       auto status = td_->chat_manager_->get_channel_permissions(dialog_id.get_channel_id());
       if (!status.can_restrict_members()) {
-        return promise.set_error(Status::Error(400, "Not enough rights to change chat permissions"));
+        return promise.set_error(400, "Not enough rights to change chat permissions");
       }
       channel_type = ChannelType::Megagroup;
       break;
@@ -2484,7 +2494,7 @@ void DialogManager::set_dialog_permissions(DialogId dialog_id,
 void DialogManager::set_dialog_emoji_status(DialogId dialog_id, const unique_ptr<EmojiStatus> &emoji_status,
                                             Promise<Unit> &&promise) {
   if (!have_dialog_force(dialog_id, "set_dialog_emoji_status")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
 
   switch (dialog_id.get_type()) {
@@ -2503,7 +2513,7 @@ void DialogManager::set_dialog_emoji_status(DialogId dialog_id, const unique_ptr
     default:
       UNREACHABLE();
   }
-  promise.set_error(Status::Error(400, "Can't change emoji status in the chat"));
+  promise.set_error(400, "Can't change emoji status in the chat");
 }
 
 void DialogManager::toggle_dialog_has_protected_content(DialogId dialog_id, bool has_protected_content,
@@ -2513,19 +2523,19 @@ void DialogManager::toggle_dialog_has_protected_content(DialogId dialog_id, bool
 
   switch (dialog_id.get_type()) {
     case DialogType::User:
-      return promise.set_error(Status::Error(400, "Can't restrict saving content in the chat"));
+      return promise.set_error(400, "Can't restrict saving content in the chat");
     case DialogType::Chat: {
       auto chat_id = dialog_id.get_chat_id();
       auto status = td_->chat_manager_->get_chat_status(chat_id);
       if (!status.is_creator()) {
-        return promise.set_error(Status::Error(400, "Only owner can restrict saving content"));
+        return promise.set_error(400, "Only owner can restrict saving content");
       }
       break;
     }
     case DialogType::Channel: {
       auto status = td_->chat_manager_->get_channel_status(dialog_id.get_channel_id());
       if (!status.is_creator()) {
-        return promise.set_error(Status::Error(400, "Only owner can restrict saving content"));
+        return promise.set_error(400, "Only owner can restrict saving content");
       }
       break;
     }
@@ -2545,18 +2555,18 @@ void DialogManager::toggle_dialog_has_protected_content(DialogId dialog_id, bool
 
 void DialogManager::set_dialog_description(DialogId dialog_id, const string &description, Promise<Unit> &&promise) {
   if (!have_dialog_force(dialog_id, "set_dialog_description")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
 
   switch (dialog_id.get_type()) {
     case DialogType::User:
-      return promise.set_error(Status::Error(400, "Can't change private chat description"));
+      return promise.set_error(400, "Can't change private chat description");
     case DialogType::Chat:
       return td_->chat_manager_->set_chat_description(dialog_id.get_chat_id(), description, std::move(promise));
     case DialogType::Channel:
       return td_->chat_manager_->set_channel_description(dialog_id.get_channel_id(), description, std::move(promise));
     case DialogType::SecretChat:
-      return promise.set_error(Status::Error(400, "Can't change secret chat description"));
+      return promise.set_error(400, "Can't change secret chat description");
     case DialogType::None:
     default:
       UNREACHABLE();
@@ -2565,14 +2575,14 @@ void DialogManager::set_dialog_description(DialogId dialog_id, const string &des
 
 void DialogManager::set_dialog_location(DialogId dialog_id, const DialogLocation &location, Promise<Unit> &&promise) {
   if (!have_dialog_force(dialog_id, "set_dialog_location")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
 
   switch (dialog_id.get_type()) {
     case DialogType::User:
     case DialogType::Chat:
     case DialogType::SecretChat:
-      return promise.set_error(Status::Error(400, "The chat can't have location"));
+      return promise.set_error(400, "The chat can't have location");
     case DialogType::Channel:
       return td_->chat_manager_->set_channel_location(dialog_id.get_channel_id(), location, std::move(promise));
     case DialogType::None:
@@ -2623,7 +2633,7 @@ void DialogManager::report_dialog(DialogId dialog_id, const string &option_id, c
       return promise.set_value(td_api::make_object<td_api::reportChatResultOk>());
     }
 
-    return promise.set_error(Status::Error(400, "Chat can't be reported"));
+    return promise.set_error(400, "Chat can't be reported");
   }
 
   for (auto message_id : message_ids) {
@@ -2638,19 +2648,19 @@ void DialogManager::report_dialog_photo(DialogId dialog_id, FileId file_id, Repo
   TRY_STATUS_PROMISE(promise, check_dialog_access(dialog_id, false, AccessRights::Read, "report_dialog_photo"));
 
   if (!can_report_dialog(dialog_id)) {
-    return promise.set_error(Status::Error(400, "Chat photo can't be reported"));
+    return promise.set_error(400, "Chat photo can't be reported");
   }
 
   auto file_view = td_->file_manager_->get_file_view(file_id);
   if (file_view.empty()) {
-    return promise.set_error(Status::Error(400, "Unknown file identifier"));
+    return promise.set_error(400, "Unknown file identifier");
   }
   if (get_main_file_type(file_view.get_type()) != FileType::Photo) {
-    return promise.set_error(Status::Error(400, "Only full chat photos can be reported"));
+    return promise.set_error(400, "Only full chat photos can be reported");
   }
   const auto *full_remote_location = file_view.get_full_remote_location();
   if (full_remote_location == nullptr || !full_remote_location->is_photo()) {
-    return promise.set_error(Status::Error(400, "Invalid photo identifier specified"));
+    return promise.set_error(400, "Invalid photo identifier specified");
   }
 
   td_->create_handler<ReportProfilePhotoQuery>(std::move(promise))
@@ -2672,6 +2682,9 @@ Status DialogManager::can_pin_messages(DialogId dialog_id) const {
     }
     case DialogType::Channel: {
       auto status = td_->chat_manager_->get_channel_permissions(dialog_id.get_channel_id());
+      if (is_monoforum_channel(dialog_id)) {
+        break;
+      }
       bool can_pin = is_broadcast_channel(dialog_id) ? status.can_edit_messages() : status.can_pin_messages();
       if (!can_pin) {
         return Status::Error(400, "Not enough rights to manage pinned messages in the chat");
@@ -2784,20 +2797,20 @@ void DialogManager::check_dialog_username(DialogId dialog_id, const string &user
                                           Promise<CheckDialogUsernameResult> &&promise) {
   if (dialog_id != DialogId() && dialog_id.get_type() != DialogType::User &&
       !have_dialog_force(dialog_id, "check_dialog_username")) {
-    return promise.set_error(Status::Error(400, "Chat not found"));
+    return promise.set_error(400, "Chat not found");
   }
 
   switch (dialog_id.get_type()) {
     case DialogType::User: {
       if (dialog_id != get_my_dialog_id()) {
-        return promise.set_error(Status::Error(400, "Can't check username for private chat with other user"));
+        return promise.set_error(400, "Can't check username for private chat with other user");
       }
       break;
     }
     case DialogType::Channel: {
       auto channel_id = dialog_id.get_channel_id();
       if (!td_->chat_manager_->get_channel_status(channel_id).is_creator()) {
-        return promise.set_error(Status::Error(400, "Not enough rights to change username"));
+        return promise.set_error(400, "Not enough rights to change username");
       }
       if (username == td_->chat_manager_->get_channel_editable_username(channel_id)) {
         return promise.set_value(CheckDialogUsernameResult::Ok);
@@ -2809,7 +2822,7 @@ void DialogManager::check_dialog_username(DialogId dialog_id, const string &user
     case DialogType::Chat:
     case DialogType::SecretChat:
       if (!username.empty()) {
-        return promise.set_error(Status::Error(400, "The chat can't have a username"));
+        return promise.set_error(400, "The chat can't have a username");
       }
       break;
     default:
@@ -2966,7 +2979,7 @@ void DialogManager::on_resolve_dialog(const string &username, ChannelId channel_
   DialogId dialog_id;
   if (username.empty()) {
     if (!td_->chat_manager_->have_channel(channel_id)) {
-      return promise.set_error(Status::Error(500, "Chat info not found"));
+      return promise.set_error(500, "Chat info not found");
     }
 
     dialog_id = DialogId(channel_id);
@@ -2978,7 +2991,7 @@ void DialogManager::on_resolve_dialog(const string &username, ChannelId channel_
     }
   }
   if (!have_dialog_force(dialog_id, "on_resolve_dialog")) {
-    return promise.set_error(Status::Error(500, "Chat not found"));
+    return promise.set_error(500, "Chat not found");
   }
   promise.set_value(std::move(dialog_id));
 }
@@ -3015,7 +3028,7 @@ DialogId DialogManager::search_public_dialog(const string &username_to_search, b
     username = username.substr(1);
   }
   if (username.empty()) {
-    promise.set_error(Status::Error(200, "Username is invalid"));
+    promise.set_error(200, "Username is invalid");
     return DialogId();
   }
 
@@ -3025,8 +3038,8 @@ DialogId DialogManager::search_public_dialog(const string &username_to_search, b
   }
 
   if (have_input_peer(dialog_id, false, AccessRights::Read)) {
-    if (!force && reload_voice_chat_on_search_usernames_.count(username)) {
-      reload_voice_chat_on_search_usernames_.erase(username);
+    if (!force && reload_video_chat_on_search_usernames_.count(username)) {
+      reload_video_chat_on_search_usernames_.erase(username);
       if (dialog_id.get_type() == DialogType::Channel) {
         td_->chat_manager_->reload_channel_full(dialog_id.get_channel_id(), std::move(promise), "search_public_dialog");
         return DialogId();
@@ -3047,14 +3060,14 @@ DialogId DialogManager::search_public_dialog(const string &username_to_search, b
   return DialogId();
 }
 
-void DialogManager::reload_voice_chat_on_search(const string &username) {
+void DialogManager::reload_video_chat_on_search(const string &username) {
   if (!td_->auth_manager_->is_authorized()) {
     return;
   }
 
   auto cleaned_username = clean_username(username);
   if (!cleaned_username.empty()) {
-    reload_voice_chat_on_search_usernames_.insert(cleaned_username);
+    reload_video_chat_on_search_usernames_.insert(cleaned_username);
   }
 }
 
@@ -3126,7 +3139,7 @@ vector<DialogId> DialogManager::search_dialogs_on_server(const string &query, in
   LOG(INFO) << "Search chats on server with query \"" << query << "\" and limit " << limit;
 
   if (limit < 0) {
-    promise.set_error(Status::Error(400, "Limit must be non-negative"));
+    promise.set_error(400, "Limit must be non-negative");
     return {};
   }
   if (limit > MAX_GET_DIALOGS) {
@@ -3190,7 +3203,7 @@ void DialogManager::on_failed_public_dialogs_search(const string &query, Status 
 }
 
 void DialogManager::reget_peer_settings(DialogId dialog_id) {
-  if (!have_input_peer(dialog_id, false, AccessRights::Read)) {
+  if (!have_input_peer(dialog_id, false, AccessRights::Read) || is_monoforum_channel(dialog_id)) {
     return;
   }
 
@@ -3281,7 +3294,7 @@ void DialogManager::toggle_dialog_report_spam_state_on_server(DialogId dialog_id
       } else {
         auto user_id = td_->user_manager_->get_secret_chat_user_id(dialog_id.get_secret_chat_id());
         if (!user_id.is_valid()) {
-          return promise.set_error(Status::Error(400, "Peer user not found"));
+          return promise.set_error(400, "Peer user not found");
         }
         return td_->create_handler<UpdatePeerSettingsQuery>(std::move(promise))->send(DialogId(user_id), false);
       }
@@ -3295,16 +3308,16 @@ void DialogManager::toggle_dialog_report_spam_state_on_server(DialogId dialog_id
 void DialogManager::get_blocked_dialogs(const td_api::object_ptr<td_api::BlockList> &block_list, int32 offset,
                                         int32 limit, Promise<td_api::object_ptr<td_api::messageSenders>> &&promise) {
   if (offset < 0) {
-    return promise.set_error(Status::Error(400, "Parameter offset must be non-negative"));
+    return promise.set_error(400, "Parameter offset must be non-negative");
   }
 
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
 
   auto block_list_id = BlockListId(block_list);
   if (!block_list_id.is_valid()) {
-    return promise.set_error(Status::Error(400, "Block list must be non-empty"));
+    return promise.set_error(400, "Block list must be non-empty");
   }
 
   td_->create_handler<GetBlockedDialogsQuery>(std::move(promise))->send(block_list_id, offset, limit);
@@ -3334,8 +3347,7 @@ void DialogManager::on_get_blocked_dialogs(int32 offset, int32 limit, int32 tota
 void DialogManager::set_dialog_available_reactions_on_server(DialogId dialog_id,
                                                              const ChatReactions &available_reactions,
                                                              Promise<Unit> &&promise) {
-  td_->create_handler<SetChatAvailableReactionsQuery>(std::move(promise))
-      ->send(dialog_id, std::move(available_reactions));
+  td_->create_handler<SetChatAvailableReactionsQuery>(std::move(promise))->send(dialog_id, available_reactions);
 }
 
 void DialogManager::set_dialog_default_send_as_on_server(DialogId dialog_id, DialogId send_as_dialog_id,
@@ -3400,6 +3412,65 @@ void DialogManager::toggle_dialog_is_blocked_on_server(DialogId dialog_id, bool 
       ->send(dialog_id, is_blocked, is_blocked_for_stories);
 }
 
+class DialogManager::ToggleDialogTopicPropertyOnServerLogEvent {
+ public:
+  DialogId dialog_id_;
+  SavedMessagesTopicId saved_messages_topic_id_;
+  bool value_;
+
+  template <class StorerT>
+  void store(StorerT &storer) const {
+    auto has_saved_messages_topic_id = saved_messages_topic_id_ != SavedMessagesTopicId();
+    BEGIN_STORE_FLAGS();
+    STORE_FLAG(value_);
+    STORE_FLAG(has_saved_messages_topic_id);
+    END_STORE_FLAGS();
+
+    td::store(dialog_id_, storer);
+    if (has_saved_messages_topic_id) {
+      td::store(saved_messages_topic_id_, storer);
+    }
+  }
+
+  template <class ParserT>
+  void parse(ParserT &parser) {
+    bool has_saved_messages_topic_id;
+    BEGIN_PARSE_FLAGS();
+    PARSE_FLAG(value_);
+    PARSE_FLAG(has_saved_messages_topic_id);
+    END_PARSE_FLAGS();
+
+    td::parse(dialog_id_, parser);
+    if (has_saved_messages_topic_id) {
+      td::parse(saved_messages_topic_id_, parser);
+    }
+  }
+};
+
+uint64 DialogManager::save_toggle_dialog_is_marked_as_unread_on_server_log_event(
+    DialogId dialog_id, SavedMessagesTopicId saved_messages_topic_id, bool is_marked_as_unread) {
+  ToggleDialogTopicPropertyOnServerLogEvent log_event{dialog_id, saved_messages_topic_id, is_marked_as_unread};
+  return binlog_add(G()->td_db()->get_binlog(), LogEvent::HandlerType::ToggleDialogIsMarkedAsUnreadOnServer,
+                    get_log_event_storer(log_event));
+}
+
+void DialogManager::toggle_dialog_is_marked_as_unread_on_server(DialogId dialog_id,
+                                                                SavedMessagesTopicId saved_messages_topic_id,
+                                                                bool is_marked_as_unread, uint64 log_event_id) {
+  if (log_event_id == 0 && dialog_id.get_type() == DialogType::SecretChat) {
+    // don't even create new binlog events
+    return;
+  }
+
+  if (log_event_id == 0 && G()->use_message_database()) {
+    log_event_id = save_toggle_dialog_is_marked_as_unread_on_server_log_event(dialog_id, saved_messages_topic_id,
+                                                                              is_marked_as_unread);
+  }
+
+  td_->create_handler<ToggleDialogUnreadMarkQuery>(get_erase_log_event_promise(log_event_id))
+      ->send(dialog_id, saved_messages_topic_id, is_marked_as_unread);
+}
+
 class DialogManager::ToggleDialogPropertyOnServerLogEvent {
  public:
   DialogId dialog_id_;
@@ -3423,28 +3494,6 @@ class DialogManager::ToggleDialogPropertyOnServerLogEvent {
     td::parse(dialog_id_, parser);
   }
 };
-
-uint64 DialogManager::save_toggle_dialog_is_marked_as_unread_on_server_log_event(DialogId dialog_id,
-                                                                                 bool is_marked_as_unread) {
-  ToggleDialogPropertyOnServerLogEvent log_event{dialog_id, is_marked_as_unread};
-  return binlog_add(G()->td_db()->get_binlog(), LogEvent::HandlerType::ToggleDialogIsMarkedAsUnreadOnServer,
-                    get_log_event_storer(log_event));
-}
-
-void DialogManager::toggle_dialog_is_marked_as_unread_on_server(DialogId dialog_id, bool is_marked_as_unread,
-                                                                uint64 log_event_id) {
-  if (log_event_id == 0 && dialog_id.get_type() == DialogType::SecretChat) {
-    // don't even create new binlog events
-    return;
-  }
-
-  if (log_event_id == 0 && G()->use_message_database()) {
-    log_event_id = save_toggle_dialog_is_marked_as_unread_on_server_log_event(dialog_id, is_marked_as_unread);
-  }
-
-  td_->create_handler<ToggleDialogUnreadMarkQuery>(get_erase_log_event_promise(log_event_id))
-      ->send(dialog_id, is_marked_as_unread);
-}
 
 uint64 DialogManager::save_toggle_dialog_is_pinned_on_server_log_event(DialogId dialog_id, bool is_pinned) {
   ToggleDialogPropertyOnServerLogEvent log_event{dialog_id, is_pinned};
@@ -3563,17 +3612,20 @@ void DialogManager::on_binlog_events(vector<BinlogEvent> &&events) {
           break;
         }
 
-        ToggleDialogPropertyOnServerLogEvent log_event;
+        ToggleDialogTopicPropertyOnServerLogEvent log_event;
         log_event_parse(log_event, event.get_data()).ensure();
 
         auto dialog_id = log_event.dialog_id_;
-        if (!have_dialog_force(dialog_id, "ToggleDialogIsMarkedAsUnreadOnServer") ||
-            !have_input_peer(dialog_id, true, AccessRights::Read)) {
+        auto saved_messages_topic_id = log_event.saved_messages_topic_id_;
+        Dependencies dependencies;
+        saved_messages_topic_id.add_dependencies(dependencies);
+        dependencies.add_dialog_and_dependencies(dialog_id);
+        if (!dependencies.resolve_force(td_, "ToggleDialogIsMarkedAsUnreadOnServer")) {
           binlog_erase(G()->td_db()->get_binlog(), event.id_);
           break;
         }
 
-        toggle_dialog_is_marked_as_unread_on_server(dialog_id, log_event.value_, event.id_);
+        toggle_dialog_is_marked_as_unread_on_server(dialog_id, saved_messages_topic_id, log_event.value_, event.id_);
         break;
       }
       case LogEvent::HandlerType::ToggleDialogIsPinnedOnServer: {

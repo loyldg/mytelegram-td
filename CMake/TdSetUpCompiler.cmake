@@ -65,6 +65,10 @@ function(td_set_up_compiler)
         set(TD_LINKER_FLAGS "-Wl,--gc-sections")
       elseif (ANDROID)
         set(TD_LINKER_FLAGS "-Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,--icf=safe")
+        if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+          # Enable 16 KB ELF alignment
+          set(TD_LINKER_FLAGS "${TD_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
+        endif()
       else()
         set(TD_LINKER_FLAGS "-Wl,--gc-sections -Wl,--exclude-libs,ALL")
       endif()
@@ -154,7 +158,7 @@ function(td_set_up_compiler)
     # see http://www.open-std.org/jtc1/sc22/wg21/docs/cwg_defects.html#1579
     add_cxx_compiler_flag("-Wno-redundant-move")
   endif()
-  if (GCC AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 12.0))
+  if (GCC)
     add_cxx_compiler_flag("-Wno-stringop-overflow")  # some false positives
   endif()
   if (CLANG AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 3.5))
@@ -164,6 +168,7 @@ function(td_set_up_compiler)
   if (GCC AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0))
     # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=104030
     add_cxx_compiler_flag("-Wbidi-chars=none")
+    add_cxx_compiler_flag("-Wno-bidirectional")
   endif()
 
   if (MINGW)

@@ -111,21 +111,22 @@ class ReferralProgramManager::GetSuggestedStarRefBotsQuery final : public Td::Re
     affiliate_type_ = affiliate_type;
     auto input_peer = affiliate_type.get_input_peer(td_);
     CHECK(input_peer != nullptr);
-    int32 flags = 0;
+    bool order_by_revenue = false;
+    bool order_by_date = false;
     switch (sort_order) {
       case ReferralProgramSortOrder::Profitability:
         break;
       case ReferralProgramSortOrder::Date:
-        flags |= telegram_api::payments_getSuggestedStarRefBots::ORDER_BY_DATE_MASK;
+        order_by_date = true;
         break;
       case ReferralProgramSortOrder::Revenue:
-        flags |= telegram_api::payments_getSuggestedStarRefBots::ORDER_BY_REVENUE_MASK;
+        order_by_revenue = true;
         break;
       default:
         UNREACHABLE();
     }
     send_query(G()->net_query_creator().create(telegram_api::payments_getSuggestedStarRefBots(
-        flags, false /*ignored*/, false /*ignored*/, std::move(input_peer), offset, limit)));
+        0, order_by_revenue, order_by_date, std::move(input_peer), offset, limit)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -224,11 +225,10 @@ class ReferralProgramManager::EditConnectedStarRefBotQuery final : public Td::Re
 
   void send(AffiliateType affiliate_type, const string &url) {
     affiliate_type_ = affiliate_type;
-    int32 flags = telegram_api::payments_editConnectedStarRefBot::REVOKED_MASK;
     auto input_peer = affiliate_type.get_input_peer(td_);
     CHECK(input_peer != nullptr);
     send_query(G()->net_query_creator().create(
-        telegram_api::payments_editConnectedStarRefBot(flags, false /*ignored*/, std::move(input_peer), url)));
+        telegram_api::payments_editConnectedStarRefBot(0, true, std::move(input_peer), url)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -415,7 +415,7 @@ void ReferralProgramManager::tear_down() {
 void ReferralProgramManager::set_dialog_referral_program(DialogId dialog_id, ReferralProgramParameters parameters,
                                                          Promise<Unit> &&promise) {
   if (!parameters.is_valid() && parameters != ReferralProgramParameters()) {
-    return promise.set_error(Status::Error(400, "Invalid affiliate parameters specified"));
+    return promise.set_error(400, "Invalid affiliate parameters specified");
   }
   switch (dialog_id.get_type()) {
     case DialogType::User: {
@@ -423,13 +423,13 @@ void ReferralProgramManager::set_dialog_referral_program(DialogId dialog_id, Ref
       if (bot_data.can_be_edited) {
         break;
       }
-      return promise.set_error(Status::Error(400, "The bot isn't owned"));
+      return promise.set_error(400, "The bot isn't owned");
     }
     case DialogType::Chat:
     case DialogType::Channel:
     case DialogType::SecretChat:
     case DialogType::None:
-      return promise.set_error(Status::Error(400, "The chat can't have affiliate program"));
+      return promise.set_error(400, "The chat can't have affiliate program");
     default:
       UNREACHABLE();
   }
@@ -450,7 +450,7 @@ void ReferralProgramManager::search_referral_programs(
     const string &offset, int32 limit, Promise<td_api::object_ptr<td_api::foundAffiliatePrograms>> &&promise) {
   TRY_RESULT_PROMISE(promise, affiliate_type, AffiliateType::get_affiliate_type(td_, affiliate));
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Limit must be positive"));
+    return promise.set_error(400, "Limit must be positive");
   }
 
   td_->create_handler<GetSuggestedStarRefBotsQuery>(std::move(promise))
@@ -488,7 +488,7 @@ void ReferralProgramManager::get_connected_referral_programs(
     Promise<td_api::object_ptr<td_api::connectedAffiliatePrograms>> &&promise) {
   TRY_RESULT_PROMISE(promise, affiliate_type, AffiliateType::get_affiliate_type(td_, affiliate));
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Limit must be positive"));
+    return promise.set_error(400, "Limit must be positive");
   }
 
   td_->create_handler<GetConnectedStarRefBotsQuery>(std::move(promise))->send(affiliate_type, offset, limit);

@@ -189,12 +189,8 @@ class GetMegagroupStatsQuery final : public Td::ResultHandler {
     auto input_channel = td_->chat_manager_->get_input_channel(channel_id);
     CHECK(input_channel != nullptr);
 
-    int32 flags = 0;
-    if (is_dark) {
-      flags |= telegram_api::stats_getMegagroupStats::DARK_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::stats_getMegagroupStats(flags, false /*ignored*/, std::move(input_channel)), {}, dc_id));
+        telegram_api::stats_getMegagroupStats(0, is_dark, std::move(input_channel)), {}, dc_id));
   }
 
   void on_result(BufferSlice packet) final {
@@ -227,12 +223,8 @@ class GetBroadcastStatsQuery final : public Td::ResultHandler {
     auto input_channel = td_->chat_manager_->get_input_channel(channel_id);
     CHECK(input_channel != nullptr);
 
-    int32 flags = 0;
-    if (is_dark) {
-      flags |= telegram_api::stats_getBroadcastStats::DARK_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::stats_getBroadcastStats(flags, false /*ignored*/, std::move(input_channel)), {}, dc_id));
+        telegram_api::stats_getBroadcastStats(0, is_dark, std::move(input_channel)), {}, dc_id));
   }
 
   void on_result(BufferSlice packet) final {
@@ -306,12 +298,8 @@ class GetBroadcastRevenueStatsQuery final : public Td::ResultHandler {
     auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id, AccessRights::Read);
     CHECK(input_peer != nullptr);
 
-    int32 flags = 0;
-    if (is_dark) {
-      flags |= telegram_api::stats_getBroadcastRevenueStats::DARK_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::stats_getBroadcastRevenueStats(flags, false /*ignored*/, std::move(input_peer))));
+        telegram_api::stats_getBroadcastRevenueStats(0, is_dark, std::move(input_peer))));
   }
 
   void on_result(BufferSlice packet) final {
@@ -472,17 +460,13 @@ class GetMessageStatsQuery final : public Td::ResultHandler {
 
     auto input_channel = td_->chat_manager_->get_input_channel(channel_id);
     if (input_channel == nullptr) {
-      return promise_.set_error(Status::Error(400, "Supergroup not found"));
+      return promise_.set_error(400, "Supergroup not found");
     }
 
-    int32 flags = 0;
-    if (is_dark) {
-      flags |= telegram_api::stats_getMessageStats::DARK_MASK;
-    }
-    send_query(G()->net_query_creator().create(
-        telegram_api::stats_getMessageStats(flags, false /*ignored*/, std::move(input_channel),
-                                            message_id.get_server_message_id().get()),
-        {}, dc_id));
+    send_query(
+        G()->net_query_creator().create(telegram_api::stats_getMessageStats(0, is_dark, std::move(input_channel),
+                                                                            message_id.get_server_message_id().get()),
+                                        {}, dc_id));
   }
 
   void on_result(BufferSlice packet) final {
@@ -520,15 +504,11 @@ class GetStoryStatsQuery final : public Td::ResultHandler {
 
     auto input_peer = td_->dialog_manager_->get_input_peer(DialogId(channel_id), AccessRights::Read);
     if (input_peer == nullptr) {
-      return promise_.set_error(Status::Error(400, "Chat not found"));
+      return promise_.set_error(400, "Chat not found");
     }
 
-    int32 flags = 0;
-    if (is_dark) {
-      flags |= telegram_api::stats_getStoryStats::DARK_MASK;
-    }
     send_query(G()->net_query_creator().create(
-        telegram_api::stats_getStoryStats(flags, false /*ignored*/, std::move(input_peer), story_id.get()), {}, dc_id));
+        telegram_api::stats_getStoryStats(0, is_dark, std::move(input_peer), story_id.get()), {}, dc_id));
   }
 
   void on_result(BufferSlice packet) final {
@@ -712,7 +692,7 @@ void StatisticsManager::get_dialog_revenue_withdrawal_url(DialogId dialog_id, co
   TRY_STATUS_PROMISE(promise, td_->dialog_manager_->check_dialog_access(dialog_id, false, AccessRights::Write,
                                                                         "get_dialog_revenue_withdrawal_url"));
   if (password.empty()) {
-    return promise.set_error(Status::Error(400, "PASSWORD_HASH_INVALID"));
+    return promise.set_error(400, "PASSWORD_HASH_INVALID");
   }
   send_closure(
       td_->password_manager_, &PasswordManager::get_input_check_password_srp, password,
@@ -762,10 +742,10 @@ void StatisticsManager::send_get_channel_message_stats_query(
 
   auto dialog_id = message_full_id.get_dialog_id();
   if (!td_->messages_manager_->have_message_force(message_full_id, "send_get_channel_message_stats_query")) {
-    return promise.set_error(Status::Error(400, "Message not found"));
+    return promise.set_error(400, "Message not found");
   }
   if (!td_->messages_manager_->can_get_message_statistics(message_full_id)) {
-    return promise.set_error(Status::Error(400, "Message statistics are inaccessible"));
+    return promise.set_error(400, "Message statistics are inaccessible");
   }
   CHECK(dialog_id.get_type() == DialogType::Channel);
   td_->create_handler<GetMessageStatsQuery>(std::move(promise))
@@ -792,10 +772,10 @@ void StatisticsManager::send_get_channel_story_stats_query(
 
   auto dialog_id = story_full_id.get_dialog_id();
   if (!td_->story_manager_->have_story_force(story_full_id)) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
   if (!td_->story_manager_->can_get_story_statistics(story_full_id)) {
-    return promise.set_error(Status::Error(400, "Story statistics are inaccessible"));
+    return promise.set_error(400, "Story statistics are inaccessible");
   }
   CHECK(dialog_id.get_type() == DialogType::Channel);
   td_->create_handler<GetStoryStatsQuery>(std::move(promise))
@@ -825,7 +805,7 @@ void StatisticsManager::send_load_async_graph_query(DcId dc_id, string token, in
 void StatisticsManager::get_message_public_forwards(MessageFullId message_full_id, string offset, int32 limit,
                                                     Promise<td_api::object_ptr<td_api::publicForwards>> &&promise) {
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
 
   auto dc_id_promise = PromiseCreator::lambda([actor_id = actor_id(this), message_full_id, offset = std::move(offset),
@@ -843,13 +823,13 @@ void StatisticsManager::send_get_message_public_forwards_query(
     DcId dc_id, MessageFullId message_full_id, string offset, int32 limit,
     Promise<td_api::object_ptr<td_api::publicForwards>> &&promise) {
   if (!td_->messages_manager_->have_message_force(message_full_id, "send_get_message_public_forwards_query")) {
-    return promise.set_error(Status::Error(400, "Message not found"));
+    return promise.set_error(400, "Message not found");
   }
   if (!td_->messages_manager_->can_get_message_statistics(message_full_id)) {
-    return promise.set_error(Status::Error(400, "Message forwards are inaccessible"));
+    return promise.set_error(400, "Message forwards are inaccessible");
   }
 
-  static constexpr int32 MAX_MESSAGE_FORWARDS = 100;  // server side limit
+  static constexpr int32 MAX_MESSAGE_FORWARDS = 100;  // server-side limit
   if (limit > MAX_MESSAGE_FORWARDS) {
     limit = MAX_MESSAGE_FORWARDS;
   }
@@ -860,12 +840,12 @@ void StatisticsManager::send_get_message_public_forwards_query(
 void StatisticsManager::get_story_public_forwards(StoryFullId story_full_id, string offset, int32 limit,
                                                   Promise<td_api::object_ptr<td_api::publicForwards>> &&promise) {
   if (limit <= 0) {
-    return promise.set_error(Status::Error(400, "Parameter limit must be positive"));
+    return promise.set_error(400, "Parameter limit must be positive");
   }
   auto dialog_id = story_full_id.get_dialog_id();
   if (dialog_id.get_type() == DialogType::User) {
     if (dialog_id != td_->dialog_manager_->get_my_dialog_id()) {
-      return promise.set_error(Status::Error(400, "Have no access to story statistics"));
+      return promise.set_error(400, "Have no access to story statistics");
     }
     return send_get_story_public_forwards_query(DcId::main(), story_full_id, std::move(offset), limit,
                                                 std::move(promise));
@@ -886,14 +866,14 @@ void StatisticsManager::send_get_story_public_forwards_query(
     DcId dc_id, StoryFullId story_full_id, string offset, int32 limit,
     Promise<td_api::object_ptr<td_api::publicForwards>> &&promise) {
   if (!td_->story_manager_->have_story_force(story_full_id)) {
-    return promise.set_error(Status::Error(400, "Story not found"));
+    return promise.set_error(400, "Story not found");
   }
   if (!td_->story_manager_->can_get_story_statistics(story_full_id) &&
       story_full_id.get_dialog_id() != td_->dialog_manager_->get_my_dialog_id()) {
-    return promise.set_error(Status::Error(400, "Story forwards are inaccessible"));
+    return promise.set_error(400, "Story forwards are inaccessible");
   }
 
-  static constexpr int32 MAX_STORY_FORWARDS = 100;  // server side limit
+  static constexpr int32 MAX_STORY_FORWARDS = 100;  // server-side limit
   if (limit > MAX_STORY_FORWARDS) {
     limit = MAX_STORY_FORWARDS;
   }
@@ -915,11 +895,9 @@ void StatisticsManager::on_get_public_forwards(
       case telegram_api::publicForwardMessage::ID: {
         auto forward = telegram_api::move_object_as<telegram_api::publicForwardMessage>(forward_ptr);
         auto dialog_id = DialogId::get_message_dialog_id(forward->message_);
-        auto message_full_id = td_->messages_manager_->on_get_message(std::move(forward->message_), false,
-                                                                      dialog_id.get_type() == DialogType::Channel,
-                                                                      false, "on_get_public_forwards");
+        auto message_full_id = td_->messages_manager_->on_get_message(dialog_id, std::move(forward->message_), false,
+                                                                      false, false, "on_get_public_forwards");
         if (message_full_id != MessageFullId()) {
-          CHECK(dialog_id == message_full_id.get_dialog_id());
           result.push_back(td_api::make_object<td_api::publicForwardMessage>(
               td_->messages_manager_->get_message_object(message_full_id, "on_get_public_forwards")));
           CHECK(result.back() != nullptr);

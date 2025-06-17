@@ -182,10 +182,10 @@ class GenAuthKeyActor final : public Actor {
 
   void hangup() final {
     if (connection_promise_) {
-      connection_promise_.set_error(Status::Error(1, "Canceled"));
+      connection_promise_.set_error(1, "Canceled");
     }
     if (handshake_promise_) {
-      handshake_promise_.set_error(Status::Error(1, "Canceled"));
+      handshake_promise_.set_error(1, "Canceled");
     }
     stop();
   }
@@ -260,7 +260,7 @@ Session::Session(unique_ptr<Callback> callback, std::shared_ptr<AuthDataShared> 
   }
   uint64 session_id = 0;
   do {
-    Random::secure_bytes(reinterpret_cast<uint8 *>(&session_id), sizeof(session_id));
+    session_id = Random::secure_uint64();
   } while (session_id == 0);
   auth_data_.set_session_id(session_id);
   use_pfs_ = use_pfs;
@@ -570,20 +570,20 @@ Status Session::on_pong(double ping_time, double pong_time, double current_time)
       status = Status::Error(PSLICE() << "No state info for " << unknown_queries_.size() << " queries from auth key "
                                       << auth_data_.get_auth_key().id() << " for "
                                       << format::as_time(Time::now() - current_info_->created_at_)
-                                      << " after ping sent at " << ping_time << " and answered at " << pong_time
-                                      << " with the current server time " << current_time);
+                                      << " after ping expected to be answered at " << ping_time << " and answered at "
+                                      << pong_time << " with the current server time " << current_time);
     }
-    if (!sent_queries_list_.empty()) {
+    if (!sent_query_list_.empty()) {
       double query_timeout = 60 + (current_time - ping_time);
-      for (auto it = sent_queries_list_.prev; it != &sent_queries_list_; it = it->prev) {
+      for (auto it = sent_query_list_.prev; it != &sent_query_list_; it = it->prev) {
         auto query = Query::from_list_node(it);
         if (Timestamp::at(query->sent_at_ + query_timeout).is_in_past()) {
           if (status.is_ok()) {
             status =
                 Status::Error(PSLICE() << "No answer from auth key " << auth_data_.get_auth_key().id() << " for "
                                        << query->net_query_ << " for " << format::as_time(Time::now() - query->sent_at_)
-                                       << " after ping sent at " << ping_time << " and answered at " << pong_time
-                                       << " with the current server time " << current_time);
+                                       << " after ping expected to be answered at " << ping_time << " and answered at "
+                                       << pong_time << " with the current server time " << current_time);
           }
           query->is_acknowledged_ = false;
         } else {
@@ -1172,7 +1172,7 @@ void Session::connection_send_query(ConnectionInfo *info, NetQueryPtr &&net_quer
   auto status =
       sent_queries_.emplace(message_id, Query{message_id, std::move(net_query), main_connection_.connection_id_, now});
   LOG_CHECK(status.second) << message_id;
-  sent_queries_list_.put(status.first->second.get_list_node());
+  sent_query_list_.put(status.first->second.get_list_node());
   if (immediately_fail_query) {
     on_message_result_error(message_id, 401, "TEST_ERROR");
   }

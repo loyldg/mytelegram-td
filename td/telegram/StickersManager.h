@@ -75,6 +75,8 @@ class StickersManager final : public Actor {
 
   StickerFormat get_sticker_format(FileId file_id) const;
 
+  int64 get_sticker_id(FileId sticker_id) const;
+
   bool is_premium_custom_emoji(CustomEmojiId custom_emoji_id, bool default_result) const;
 
   bool have_sticker(StickerSetId sticker_set_id, int64 sticker_id);
@@ -169,8 +171,8 @@ class StickersManager final : public Actor {
   Status on_animated_emoji_message_clicked(string &&emoji, MessageFullId message_full_id, string data);
 
   void create_sticker(FileId file_id, FileId premium_animation_file_id, string minithumbnail, PhotoSize thumbnail,
-                      Dimensions dimensions, tl_object_ptr<telegram_api::documentAttributeSticker> sticker,
-                      tl_object_ptr<telegram_api::documentAttributeCustomEmoji> custom_emoji,
+                      Dimensions dimensions, telegram_api::object_ptr<telegram_api::documentAttributeSticker> sticker,
+                      telegram_api::object_ptr<telegram_api::documentAttributeCustomEmoji> custom_emoji,
                       StickerFormat sticker_format, MultiPromiseActor *load_data_multipromise_ptr);
 
   bool has_secret_input_media(FileId sticker_file_id) const;
@@ -464,9 +466,9 @@ class StickersManager final : public Actor {
   static constexpr int32 MAX_FEATURED_STICKER_SET_VIEW_DELAY = 5;
   static constexpr int32 OLD_FEATURED_STICKER_SET_SLICE_SIZE = 20;
 
-  static constexpr int32 MAX_FOUND_STICKERS = 100;                 // server side limit
-  static constexpr size_t MAX_STICKER_SET_TITLE_LENGTH = 64;       // server side limit
-  static constexpr size_t MAX_STICKER_SET_SHORT_NAME_LENGTH = 64;  // server side limit
+  static constexpr int32 MAX_FOUND_STICKERS = 100;                 // server-side limit
+  static constexpr size_t MAX_STICKER_SET_TITLE_LENGTH = 64;       // server-side limit
+  static constexpr size_t MAX_STICKER_SET_SHORT_NAME_LENGTH = 64;  // server-side limit
   static constexpr size_t MAX_GET_CUSTOM_EMOJI_STICKERS = 200;     // server-side limit
 
   static constexpr int32 EMOJI_KEYWORDS_UPDATE_DELAY = 3600;
@@ -606,8 +608,6 @@ class StickersManager final : public Actor {
   class StickerSetListLogEvent;
 
   class UploadStickerFileCallback;
-
-  int64 get_sticker_id(FileId sticker_id) const;
 
   CustomEmojiId get_custom_emoji_id(FileId sticker_id) const;
 

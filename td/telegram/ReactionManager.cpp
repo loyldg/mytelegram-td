@@ -9,6 +9,7 @@
 #include "td/telegram/AuthManager.h"
 #include "td/telegram/ConfigManager.h"
 #include "td/telegram/Dependencies.h"
+#include "td/telegram/DialogId.h"
 #include "td/telegram/DialogManager.h"
 #include "td/telegram/Global.h"
 #include "td/telegram/logevent/LogEvent.h"
@@ -972,13 +973,13 @@ bool ReactionManager::is_active_reaction(const ReactionType &reaction_type) cons
 
 void ReactionManager::set_default_reaction(ReactionType reaction_type, Promise<Unit> &&promise) {
   if (reaction_type.is_empty()) {
-    return promise.set_error(Status::Error(400, "Default reaction must be non-empty"));
+    return promise.set_error(400, "Default reaction must be non-empty");
   }
   if (reaction_type.is_paid_reaction()) {
-    return promise.set_error(Status::Error(400, "Can't set paid reaction as default"));
+    return promise.set_error(400, "Can't set paid reaction as default");
   }
   if (!reaction_type.is_custom_reaction() && !is_active_reaction(reaction_type)) {
-    return promise.set_error(Status::Error(400, "Can't set inactive reaction as default"));
+    return promise.set_error(400, "Can't set inactive reaction as default");
   }
 
   if (td_->option_manager_->get_option_string("default_reaction", "-") != reaction_type.get_string()) {
@@ -1051,7 +1052,7 @@ ReactionManager::SavedReactionTags *ReactionManager::get_saved_reaction_tags(
 void ReactionManager::get_saved_messages_tags(SavedMessagesTopicId saved_messages_topic_id,
                                               Promise<td_api::object_ptr<td_api::savedMessagesTags>> &&promise) {
   if (!saved_messages_topic_id.is_valid() && saved_messages_topic_id != SavedMessagesTopicId()) {
-    return promise.set_error(Status::Error(400, "Invalid Saved Messages topic specified"));
+    return promise.set_error(400, "Invalid Saved Messages topic specified");
   }
   const auto *tags = get_saved_reaction_tags(saved_messages_topic_id);
   if (tags->is_inited_) {
@@ -1105,7 +1106,10 @@ void ReactionManager::on_get_saved_messages_tags(
   switch (tags_ptr->get_id()) {
     case telegram_api::messages_savedReactionTagsNotModified::ID:
       if (!reaction_tags->is_inited_) {
-        LOG(ERROR) << "Receive messages.savedReactionTagsNotModified for non-inited tags";
+        // the list of tags is empty
+        CHECK(reaction_tags->tags_.empty());
+        reaction_tags->is_inited_ = true;
+        need_send_update = true;
       }
       break;
     case telegram_api::messages_savedReactionTags::ID: {
@@ -1152,7 +1156,7 @@ td_api::object_ptr<td_api::updateSavedMessagesTags> ReactionManager::get_update_
     SavedMessagesTopicId saved_messages_topic_id, const SavedReactionTags *tags) const {
   CHECK(tags != nullptr);
   return td_api::make_object<td_api::updateSavedMessagesTags>(
-      td_->saved_messages_manager_->get_saved_messages_topic_id_object(saved_messages_topic_id),
+      td_->saved_messages_manager_->get_saved_messages_topic_id_object(DialogId(), saved_messages_topic_id),
       tags->get_saved_messages_tags_object());
 }
 
@@ -1194,10 +1198,10 @@ void ReactionManager::update_saved_messages_tags(SavedMessagesTopicId saved_mess
 
 void ReactionManager::set_saved_messages_tag_title(ReactionType reaction_type, string title, Promise<Unit> &&promise) {
   if (reaction_type.is_empty()) {
-    return promise.set_error(Status::Error(400, "Reaction type must be non-empty"));
+    return promise.set_error(400, "Reaction type must be non-empty");
   }
   if (reaction_type.is_paid_reaction()) {
-    return promise.set_error(Status::Error(400, "Invalid reaction specified"));
+    return promise.set_error(400, "Invalid reaction specified");
   }
   title = clean_name(title, MAX_TAG_TITLE_LENGTH);
 
@@ -1344,7 +1348,7 @@ void ReactionManager::on_get_message_effects(
       for (const auto &available_effect : effects->effects_) {
         Effect effect;
         effect.id_ = MessageEffectId(available_effect->id_);
-        effect.emoji_ = std::move(available_effect->emoticon_);
+        effect.emoji_ = available_effect->emoticon_;
         effect.is_premium_ = available_effect->premium_required_;
         if (available_effect->static_icon_id_ != 0) {
           auto it = stickers.find(available_effect->static_icon_id_);

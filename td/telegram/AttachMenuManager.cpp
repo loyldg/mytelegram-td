@@ -95,13 +95,9 @@ class ToggleBotInAttachMenuQuery final : public Td::ResultHandler {
   explicit ToggleBotInAttachMenuQuery(Promise<Unit> &&promise) : promise_(std::move(promise)) {
   }
 
-  void send(tl_object_ptr<telegram_api::InputUser> &&input_user, bool is_added, bool allow_write_access) {
-    int32 flags = 0;
-    if (is_added && allow_write_access) {
-      flags |= telegram_api::messages_toggleBotInAttachMenu::WRITE_ALLOWED_MASK;
-    }
-    send_query(G()->net_query_creator().create(
-        telegram_api::messages_toggleBotInAttachMenu(flags, false /*ignored*/, std::move(input_user), is_added)));
+  void send(telegram_api::object_ptr<telegram_api::InputUser> &&input_user, bool is_added, bool allow_write_access) {
+    send_query(G()->net_query_creator().create(telegram_api::messages_toggleBotInAttachMenu(
+        0, is_added && allow_write_access, std::move(input_user), is_added)));
   }
 
   void on_result(BufferSlice packet) final {
@@ -598,7 +594,7 @@ Result<AttachMenuManager::AttachMenuBot> AttachMenuManager::get_attach_menu_bot(
 
 void AttachMenuManager::reload_attach_menu_bots(Promise<Unit> &&promise) {
   if (!is_active()) {
-    return promise.set_error(Status::Error(400, "Can't reload attachment menu bots"));
+    return promise.set_error(400, "Can't reload attachment menu bots");
   }
 
   reload_attach_menu_bots_queries_.push_back(std::move(promise));
@@ -682,7 +678,7 @@ void AttachMenuManager::get_attach_menu_bot(UserId user_id,
 
   TRY_RESULT_PROMISE(promise, bot_data, td_->user_manager_->get_bot_data(user_id));
   if (!bot_data.can_be_added_to_attach_menu) {
-    return promise.set_error(Status::Error(400, "The bot can't be added to attachment menu"));
+    return promise.set_error(400, "The bot can't be added to attachment menu");
   }
 
   auto query_promise =
@@ -696,7 +692,7 @@ void AttachMenuManager::get_attach_menu_bot(UserId user_id,
 
 void AttachMenuManager::reload_attach_menu_bot(UserId user_id, Promise<Unit> &&promise) {
   if (!is_active()) {
-    return promise.set_error(Status::Error(400, "Can't reload attachment menu bot"));
+    return promise.set_error(400, "Can't reload attachment menu bot");
   }
 
   TRY_RESULT_PROMISE(promise, input_user, td_->user_manager_->get_input_user(user_id));
@@ -729,11 +725,11 @@ void AttachMenuManager::on_get_attach_menu_bot(
   auto r_attach_menu_bot = get_attach_menu_bot(std::move(bot->bot_));
   if (r_attach_menu_bot.is_error()) {
     LOG(ERROR) << r_attach_menu_bot.error().message();
-    return promise.set_error(Status::Error(500, "Receive invalid response"));
+    return promise.set_error(500, "Receive invalid response");
   }
   auto attach_menu_bot = r_attach_menu_bot.move_as_ok();
   if (attach_menu_bot.user_id_ != user_id) {
-    return promise.set_error(Status::Error(500, "Receive wrong bot"));
+    return promise.set_error(500, "Receive wrong bot");
   }
   if (attach_menu_bot.is_added_) {
     bool is_found = false;
@@ -786,7 +782,7 @@ void AttachMenuManager::toggle_bot_is_added_to_attach_menu(UserId user_id, bool 
   if (is_added) {
     TRY_RESULT_PROMISE(promise, bot_data, td_->user_manager_->get_bot_data(user_id));
     if (!bot_data.can_be_added_to_attach_menu) {
-      return promise.set_error(Status::Error(400, "The bot can't be added to attachment menu"));
+      return promise.set_error(400, "The bot can't be added to attachment menu");
     }
   } else {
     remove_bot_from_attach_menu(user_id);

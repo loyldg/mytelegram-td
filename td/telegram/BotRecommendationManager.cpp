@@ -126,7 +126,7 @@ bool BotRecommendationManager::are_suitable_recommended_bots(const RecommendedBo
 
 void BotRecommendationManager::get_bot_recommendations(UserId bot_user_id, bool return_local,
                                                        Promise<td_api::object_ptr<td_api::users>> &&users_promise,
-                                                       Promise<td_api::object_ptr<td_api::count>> &&count_promise) {
+                                                       Promise<int32> &&count_promise) {
   auto r_bot_input_user = td_->user_manager_->get_input_user(bot_user_id);
   if (r_bot_input_user.is_error()) {
     if (users_promise) {
@@ -139,10 +139,10 @@ void BotRecommendationManager::get_bot_recommendations(UserId bot_user_id, bool 
   }
   if (!td_->user_manager_->is_user_bot(bot_user_id)) {
     if (users_promise) {
-      users_promise.set_error(Status::Error(400, "Bot not found"));
+      users_promise.set_error(400, "Bot not found");
     }
     if (count_promise) {
-      count_promise.set_error(Status::Error(400, "Bot not found"));
+      count_promise.set_error(400, "Bot not found");
     }
     return;
   }
@@ -156,7 +156,8 @@ void BotRecommendationManager::get_bot_recommendations(UserId bot_user_id, bool 
             td_->user_manager_->get_users_object(it->second.total_count_, it->second.bot_user_ids_));
       }
       if (count_promise) {
-        count_promise.set_value(td_api::make_object<td_api::count>(it->second.total_count_));
+        auto count = it->second.total_count_;
+        count_promise.set_value(std::move(count));
       }
       if (next_reload_time > Time::now()) {
         return;
@@ -181,7 +182,7 @@ string BotRecommendationManager::get_bot_recommendations_database_key(UserId bot
 
 void BotRecommendationManager::load_bot_recommendations(UserId bot_user_id, bool use_database, bool return_local,
                                                         Promise<td_api::object_ptr<td_api::users>> &&users_promise,
-                                                        Promise<td_api::object_ptr<td_api::count>> &&count_promise) {
+                                                        Promise<int32> &&count_promise) {
   if (count_promise) {
     get_bot_recommendation_count_queries_[return_local][bot_user_id].push_back(std::move(count_promise));
   }
@@ -228,7 +229,8 @@ void BotRecommendationManager::finish_load_bot_recommendations_queries(UserId bo
       CHECK(!promises.empty());
       get_bot_recommendation_count_queries_[return_local].erase(it);
       for (auto &promise : promises) {
-        promise.set_value(td_api::make_object<td_api::count>(total_count));
+        auto count = total_count;
+        promise.set_value(std::move(count));
       }
     }
   }
@@ -284,7 +286,7 @@ void BotRecommendationManager::reload_bot_recommendations(UserId bot_user_id) {
     CHECK(!promises.empty());
     get_bot_recommendation_count_queries_[1].erase(it);
     for (auto &promise : promises) {
-      promise.set_value(td_api::make_object<td_api::count>(-1));
+      promise.set_value(-1);
     }
   }
   auto query_promise = PromiseCreator::lambda(
@@ -352,7 +354,7 @@ void BotRecommendationManager::on_get_bot_recommendations(
 void BotRecommendationManager::open_bot_recommended_bot(UserId bot_user_id, UserId opened_bot_user_id,
                                                         Promise<Unit> &&promise) {
   if (!td_->user_manager_->is_user_bot(bot_user_id) || !td_->user_manager_->is_user_bot(opened_bot_user_id)) {
-    return promise.set_error(Status::Error(400, "Bot not found"));
+    return promise.set_error(400, "Bot not found");
   }
   vector<telegram_api::object_ptr<telegram_api::jsonObjectValue>> data;
   data.push_back(telegram_api::make_object<telegram_api::jsonObjectValue>(

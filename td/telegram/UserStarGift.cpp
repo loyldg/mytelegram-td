@@ -6,6 +6,7 @@
 //
 #include "td/telegram/UserStarGift.h"
 
+#include "td/telegram/AuthManager.h"
 #include "td/telegram/DialogId.h"
 #include "td/telegram/DialogManager.h"
 #include "td/telegram/MessageSender.h"
@@ -25,6 +26,8 @@ UserStarGift::UserStarGift(Td *td, telegram_api::object_ptr<telegram_api::savedS
     , upgrade_star_count_(StarManager::get_star_count(gift->upgrade_stars_))
     , transfer_star_count_(StarManager::get_star_count(gift->transfer_stars_))
     , date_(gift->date_)
+    , can_transfer_at_(max(0, gift->can_transfer_at_))
+    , can_resell_at_(max(0, gift->can_resell_at_))
     , can_export_at_(max(0, gift->can_export_at_))
     , is_name_hidden_(gift->name_hidden_)
     , is_saved_(!gift->unsaved_)
@@ -54,7 +57,7 @@ UserStarGift::UserStarGift(Td *td, telegram_api::object_ptr<telegram_api::savedS
     LOG(ERROR) << "Receive " << sender_dialog_id_ << " as sender of a gift";
     sender_dialog_id_ = DialogId();
   }
-  if (!is_saved_ && is_user && !is_me) {
+  if (!is_saved_ && is_user && !is_me && !td->auth_manager_->is_bot()) {
     LOG(ERROR) << "Receive non-saved gift for another user";
     is_saved_ = true;
   }
@@ -67,7 +70,7 @@ td_api::object_ptr<td_api::receivedGift> UserStarGift::get_received_gift_object(
       sender_dialog_id_ == DialogId() ? nullptr : get_message_sender_object(td, sender_dialog_id_, "receivedGift"),
       get_formatted_text_object(td->user_manager_.get(), message_, true, -1), is_name_hidden_, is_saved_, is_pinned_,
       can_upgrade_, can_transfer_, was_refunded_, date_, gift_.get_sent_gift_object(td), convert_star_count_,
-      upgrade_star_count_, transfer_star_count_, can_export_at_);
+      upgrade_star_count_, transfer_star_count_, can_transfer_at_, can_resell_at_, can_export_at_);
 }
 
 }  // namespace td

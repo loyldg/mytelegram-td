@@ -184,7 +184,7 @@ class Task : public TestClient::Listener {
           TRY_RESULT_PROMISE(callback, obj, std::move(r_obj));
           if (obj->get_id() == td::td_api::error::ID) {
             auto err = move_tl_object_as<td_api::error>(std::move(obj));
-            callback.set_error(Status::Error(err->code_, err->message_));
+            callback.set_error(err->code_, err->message_);
             return;
           }
           callback.set_value(move_tl_object_as<typename ResultT::element_type>(std::move(obj)));
@@ -212,7 +212,7 @@ class InitTask : public Task {
  public:
   struct Options {
     string name;
-    int32 api_id;
+    int32 api_id = 0;
     string api_hash;
   };
   InitTask(Options options, td::Promise<> promise) : options_(std::move(options)), promise_(std::move(promise)) {
@@ -251,8 +251,7 @@ class InitTask : public Task {
       }
       default:
         LOG(ERROR) << "???";
-        promise_.set_error(
-            Status::Error(PSLICE() << "Unexpected authorization state " << to_string(authorization_state)));
+        promise_.set_error(PSLICE() << "Unexpected authorization state " << to_string(authorization_state));
         stop();
         break;
     }
@@ -279,8 +278,8 @@ class InitTask : public Task {
 class GetMe : public Task {
  public:
   struct Result {
-    int64 user_id;
-    int64 chat_id;
+    int64 user_id = 0;
+    int64 chat_id = 0;
   };
   explicit GetMe(Promise<Result> promise) : promise_(std::move(promise)) {
   }

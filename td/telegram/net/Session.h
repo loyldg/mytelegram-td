@@ -149,7 +149,7 @@ class Session final
   PendingQueries pending_queries_;
   std::map<mtproto::MessageId, Query> sent_queries_;
   std::deque<NetQueryPtr> pending_invoke_after_queries_;
-  ListNode sent_queries_list_;
+  ListNode sent_query_list_;
 
   struct ConnectionInfo {
     int8 connection_id_ = 0;
@@ -162,7 +162,7 @@ class Session final
     double created_at_ = 0;
   };
 
-  ConnectionInfo *current_info_;
+  ConnectionInfo *current_info_ = nullptr;
   ConnectionInfo main_connection_;
   ConnectionInfo long_poll_connection_;
   mtproto::ConnectionManager::ConnectionToken connection_token_;
@@ -195,9 +195,9 @@ class Session final
   enum HandshakeId : int32 { MainAuthKeyHandshake = 0, TmpAuthKeyHandshake = 1 };
   std::array<HandshakeInfo, 2> handshake_info_;
 
-  double wakeup_at_;
+  double wakeup_at_ = 0.0;
 
-  // mtproto::AuthData should be the last field, because it's size is about 32 KB
+  // mtproto::AuthData should be the last field, because its size is about 32 KB
   mtproto::AuthData auth_data_;
 
   void on_handshake_ready(Result<unique_ptr<mtproto::AuthKeyHandshake>> r_handshake);
