@@ -62,12 +62,15 @@ class GetStarGiftsQuery final : public Td::ResultHandler {
     }
 
     auto ptr = result_ptr.move_as_ok();
-    LOG(INFO) << "Receive result for GetStarGiftsQuery: " << to_string(ptr);
+    LOG(DEBUG) << "Receive result for GetStarGiftsQuery: " << to_string(ptr);
     if (ptr->get_id() != telegram_api::payments_starGifts::ID) {
       LOG(ERROR) << "Receive " << to_string(ptr);
       return promise_.set_error(500, "Receive unexpected response");
     }
     auto results = telegram_api::move_object_as<telegram_api::payments_starGifts>(ptr);
+    td_->user_manager_->on_get_users(std::move(results->users_), "GetStarGiftsQuery");
+    td_->chat_manager_->on_get_chats(std::move(results->chats_), "GetStarGiftsQuery");
+
     vector<td_api::object_ptr<td_api::availableGift>> options;
     for (auto &gift : results->gifts_) {
       int64 availability_resale = 0;
@@ -75,20 +78,26 @@ class GetStarGiftsQuery final : public Td::ResultHandler {
       string title;
       if (gift->get_id() == telegram_api::starGift::ID) {
         auto star_gift = static_cast<const telegram_api::starGift *>(gift.get());
-        availability_resale = star_gift->availability_resale_;
-        resell_min_stars = StarManager::get_star_count(star_gift->resell_min_stars_);
-        title = star_gift->title_;
-        if (availability_resale < 0 || availability_resale > 1000000000) {
-          LOG(ERROR) << "Receive " << availability_resale << " available gifts";
-          availability_resale = 0;
-        } else if (resell_min_stars == 0 && availability_resale > 0) {
-          LOG(ERROR) << "Receive " << availability_resale << " available gifts with the minimum price of "
-                     << resell_min_stars;
-          availability_resale = 0;
-        }
-        if (availability_resale == 0) {
-          resell_min_stars = 0;
-          title.clear();
+        if (td_->auth_manager_->is_bot()) {
+          if (star_gift->availability_total_ > 0 && star_gift->availability_remains_ == 0) {
+            continue;
+          }
+        } else {
+          availability_resale = star_gift->availability_resale_;
+          resell_min_stars = StarManager::get_star_count(star_gift->resell_min_stars_);
+          title = star_gift->title_;
+          if (availability_resale < 0 || availability_resale > 1000000000) {
+            LOG(ERROR) << "Receive " << availability_resale << " available gifts";
+            availability_resale = 0;
+          } else if (resell_min_stars == 0 && availability_resale > 0) {
+            LOG(ERROR) << "Receive " << availability_resale << " available gifts with the minimum price of "
+                       << resell_min_stars;
+            availability_resale = 0;
+          }
+          if (availability_resale == 0) {
+            resell_min_stars = 0;
+            title.clear();
+          }
         }
       }
 
@@ -577,10 +586,14 @@ class GetGiftUpgradePaymentFormQuery final : public Td::ResultHandler {
         break;
       case telegram_api::payments_paymentFormStarGift::ID: {
         auto payment_form = static_cast<const telegram_api::payments_paymentFormStarGift *>(payment_form_ptr.get());
-        if (payment_form->invoice_->prices_.size() != 1u ||
-            payment_form->invoice_->prices_[0]->amount_ != star_count_) {
+        if (payment_form->invoice_->prices_.size() != 1u || payment_form->invoice_->prices_[0]->amount_ > star_count_) {
           td_->star_manager_->add_pending_owned_star_count(star_count_, false);
           return promise_.set_error(400, "Wrong upgrade price specified");
+        }
+        if (payment_form->invoice_->prices_[0]->amount_ != star_count_) {
+          td_->star_manager_->add_pending_owned_star_count(star_count_ - payment_form->invoice_->prices_[0]->amount_,
+                                                           false);
+          star_count_ = payment_form->invoice_->prices_[0]->amount_;
         }
         td_->create_handler<UpgradeGiftQuery>(std::move(promise_))
             ->send(business_connection_id_, std::move(upgrade_input_invoice_), payment_form->form_id_, star_count_);
@@ -828,10 +841,14 @@ class GetGiftResalePaymentFormQuery final : public Td::ResultHandler {
         break;
       case telegram_api::payments_paymentFormStarGift::ID: {
         auto payment_form = static_cast<const telegram_api::payments_paymentFormStarGift *>(payment_form_ptr.get());
-        if (payment_form->invoice_->prices_.size() != 1u ||
-            payment_form->invoice_->prices_[0]->amount_ != star_count_) {
+        if (payment_form->invoice_->prices_.size() != 1u || payment_form->invoice_->prices_[0]->amount_ > star_count_) {
           td_->star_manager_->add_pending_owned_star_count(star_count_, false);
           return promise_.set_error(400, "Wrong resale price specified");
+        }
+        if (payment_form->invoice_->prices_[0]->amount_ != star_count_) {
+          td_->star_manager_->add_pending_owned_star_count(star_count_ - payment_form->invoice_->prices_[0]->amount_,
+                                                           false);
+          star_count_ = payment_form->invoice_->prices_[0]->amount_;
         }
         td_->create_handler<ResaleGiftQuery>(std::move(promise_))
             ->send(std::move(resale_input_invoice_), payment_form->form_id_, star_count_);
@@ -1565,7 +1582,6 @@ void StarGiftManager::register_gift(MessageFullId message_full_id, const char *s
     return;
   }
   CHECK(!td_->auth_manager_->is_bot());
-  CHECK(message_id.is_valid());
   CHECK(message_id.is_server());
   LOG(INFO) << "Register gift in " << message_full_id << " from " << source;
   auto gift_message_number = ++gift_message_count_;
@@ -1580,7 +1596,6 @@ void StarGiftManager::unregister_gift(MessageFullId message_full_id, const char 
     return;
   }
   CHECK(!td_->auth_manager_->is_bot());
-  CHECK(message_id.is_valid());
   CHECK(message_id.is_server());
   LOG(INFO) << "Unregister gift in " << message_full_id << " from " << source;
   auto message_number = gift_message_full_ids_[message_full_id];
