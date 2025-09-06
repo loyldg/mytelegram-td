@@ -176,9 +176,30 @@ OptionManager::OptionManager(Td *td)
   set_default_integer_option("channel_autotranslation_level_min", is_test_dc ? 1 : 3);
   set_default_integer_option("gift_resale_star_count_min", 125);
   set_default_integer_option("gift_resale_star_count_max", 100000);
-  set_default_integer_option("gift_resale_earnings_per_mille", 800);
+  set_default_integer_option("gift_resale_star_earnings_per_mille", 800);
   set_default_integer_option("poll_answer_count_max", 12);
   set_default_integer_option("direct_channel_message_star_count_default", 10);
+  set_default_integer_option("checklist_task_text_length_max", 100);
+  set_default_integer_option("checklist_title_length_max", 255);
+  set_default_integer_option("checklist_task_count_max", is_test_dc ? 10 : 30);
+  set_default_integer_option("suggested_post_star_count_min", 5);
+  set_default_integer_option("suggested_post_star_count_max", 100000);
+  set_default_integer_option("suggested_post_toncoin_cent_count_min", 1);
+  set_default_integer_option("suggested_post_toncoin_cent_count_max", 1000000);
+  set_default_integer_option("suggested_post_star_earnings_per_mille", 850);
+  set_default_integer_option("suggested_post_toncoin_earnings_per_mille", 850);
+  set_default_integer_option("million_toncoin_to_usd_rate", 3000000);
+  set_default_integer_option("suggested_post_lifetime_min", is_test_dc ? 120 : 86400);
+  set_default_integer_option("suggested_post_send_delay_min", 300);
+  set_default_integer_option("suggested_post_send_delay_max", 2678400);
+  set_default_integer_option("star_withdrawal_count_max", is_test_dc ? 100 : 25000000);
+  set_default_integer_option("gift_collection_count_max", 10);
+  set_default_integer_option("gift_collection_gift_count_max", 500);
+  set_default_integer_option("gift_resale_toncoin_cent_count_min", 100);
+  set_default_integer_option("gift_resale_toncoin_cent_count_max", 10000000);
+  set_default_integer_option("gift_resale_toncoin_earnings_per_mille", 900);
+  set_default_integer_option("story_album_count_max", is_test_dc ? 20 : 100);
+  set_default_integer_option("story_album_story_count_max", is_test_dc ? 200 : 1000);
 
   if (options.isset("my_phone_number") || !options.isset("my_id")) {
     update_premium_options();
@@ -196,6 +217,7 @@ OptionManager::OptionManager(Td *td)
   set_option_empty("usd_to_1000_star_rate");
   set_option_empty("1000_star_to_usd_rate");
   set_option_empty("is_location_visible");
+  set_option_empty("gift_resale_earnings_per_mille");
 }
 
 OptionManager::~OptionManager() = default;
@@ -731,7 +753,7 @@ td_api::object_ptr<td_api::OptionValue> OptionManager::get_option_synchronously(
       break;
     case 'v':
       if (name == "version") {
-        return td_api::make_object<td_api::optionValueString>("1.8.50");
+        return td_api::make_object<td_api::optionValueString>("1.8.53");
       }
       break;
   }
