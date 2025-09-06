@@ -16,6 +16,7 @@
 #include "td/telegram/DialogLocation.h"
 #include "td/telegram/DialogManager.h"
 #include "td/telegram/DialogParticipantManager.h"
+#include "td/telegram/DialogPhoto.hpp"
 #include "td/telegram/EmojiStatus.h"
 #include "td/telegram/FileReferenceManager.h"
 #include "td/telegram/files/FileManager.h"
@@ -33,10 +34,10 @@
 #include "td/telegram/MissingInvitee.h"
 #include "td/telegram/OptionManager.h"
 #include "td/telegram/PeerColor.h"
-#include "td/telegram/Photo.h"
 #include "td/telegram/Photo.hpp"
 #include "td/telegram/PhotoSize.h"
 #include "td/telegram/ServerMessageId.h"
+#include "td/telegram/StarManager.h"
 #include "td/telegram/StickersManager.h"
 #include "td/telegram/StoryManager.h"
 #include "td/telegram/SuggestedAction.h"
@@ -2346,6 +2347,7 @@ void ChatManager::ChannelFull::store(StorerT &storer) const {
   bool has_bot_verification = bot_verification != nullptr;
   bool has_gift_count = gift_count != 0;
   bool has_monoforum_channel_id = monoforum_channel_id.is_valid();
+  bool has_send_paid_message_stars = send_paid_message_stars != 0;
   BEGIN_STORE_FLAGS();
   STORE_FLAG(has_description);
   STORE_FLAG(has_administrator_count);
@@ -2394,6 +2396,7 @@ void ChatManager::ChannelFull::store(StorerT &storer) const {
     STORE_FLAG(has_stargifts_available);
     STORE_FLAG(has_paid_messages_available);
     STORE_FLAG(has_monoforum_channel_id);
+    STORE_FLAG(has_send_paid_message_stars);
     END_STORE_FLAGS();
   }
   if (has_description) {
@@ -2464,6 +2467,9 @@ void ChatManager::ChannelFull::store(StorerT &storer) const {
   if (has_monoforum_channel_id) {
     store(monoforum_channel_id, storer);
   }
+  if (has_send_paid_message_stars) {
+    store(send_paid_message_stars, storer);
+  }
 }
 
 template <class ParserT>
@@ -2496,6 +2502,7 @@ void ChatManager::ChannelFull::parse(ParserT &parser) {
   bool has_bot_verification = false;
   bool has_gift_count = false;
   bool has_monoforum_channel_id = false;
+  bool has_send_paid_message_stars = false;
   BEGIN_PARSE_FLAGS();
   PARSE_FLAG(has_description);
   PARSE_FLAG(has_administrator_count);
@@ -2544,6 +2551,7 @@ void ChatManager::ChannelFull::parse(ParserT &parser) {
     PARSE_FLAG(has_stargifts_available);
     PARSE_FLAG(has_paid_messages_available);
     PARSE_FLAG(has_monoforum_channel_id);
+    PARSE_FLAG(has_send_paid_message_stars);
     END_PARSE_FLAGS();
   }
   if (has_description) {
@@ -2621,6 +2629,9 @@ void ChatManager::ChannelFull::parse(ParserT &parser) {
   }
   if (has_monoforum_channel_id) {
     parse(monoforum_channel_id, parser);
+  }
+  if (has_send_paid_message_stars) {
+    parse(send_paid_message_stars, parser);
   }
 
   if (legacy_can_view_statistics) {
@@ -2743,6 +2754,19 @@ bool ChatManager::have_input_peer_channel(const Channel *c, ChannelId channel_id
   if (access_rights == AccessRights::Know) {
     return true;
   }
+  if (!from_linked && c->is_monoforum) {
+    if (td_->auth_manager_->is_bot()) {
+      return c->is_admined_monoforum;
+    }
+    auto monoforum_channel_id = c->monoforum_channel_id;
+    auto *monoforum_channel = get_channel(monoforum_channel_id);
+    if (monoforum_channel != nullptr) {
+      return have_input_peer_channel(monoforum_channel, monoforum_channel_id, AccessRights::Read, true);
+    }
+    LOG(INFO) << "Have no parent " << monoforum_channel_id;
+    return true;
+  }
+
   if (c->status.is_administrator()) {
     return true;
   }
@@ -2751,15 +2775,6 @@ bool ChatManager::have_input_peer_channel(const Channel *c, ChannelId channel_id
     return false;
   }
   if (c->status.is_member()) {
-    return true;
-  }
-
-  if (!from_linked && c->is_monoforum) {
-    auto monoforum_channel_id = c->monoforum_channel_id;
-    auto *monoforum_channel = get_channel(monoforum_channel_id);
-    if (monoforum_channel != nullptr) {
-      return have_input_peer_channel(monoforum_channel, monoforum_channel_id, access_rights, true);
-    }
     return true;
   }
 
@@ -3311,7 +3326,7 @@ void ChatManager::toggle_channel_join_to_send(ChannelId channel_id, bool join_to
   if (c == nullptr) {
     return promise.set_error(400, "Supergroup not found");
   }
-  if (get_channel_type(c) == ChannelType::Broadcast || c->is_gigagroup) {
+  if (get_channel_type(c) == ChannelType::Broadcast || c->is_gigagroup || c->is_monoforum) {
     return promise.set_error(400, "The method can be called only for ordinary supergroups");
   }
   if (!get_channel_status(c).can_restrict_members()) {
@@ -3326,7 +3341,7 @@ void ChatManager::toggle_channel_join_request(ChannelId channel_id, bool join_re
   if (c == nullptr) {
     return promise.set_error(400, "Supergroup not found");
   }
-  if (get_channel_type(c) == ChannelType::Broadcast || c->is_gigagroup) {
+  if (get_channel_type(c) == ChannelType::Broadcast || c->is_gigagroup || c->is_monoforum) {
     return promise.set_error(400, "The method can be called only for ordinary supergroups");
   }
   if (!get_channel_status(c).can_restrict_members()) {
@@ -3824,7 +3839,7 @@ void ChatManager::report_channel_anti_spam_false_positive(ChannelId channel_id, 
     return promise.set_error(400, "Anti-spam checks false positives can be reported only by chat administrators");
   }
 
-  if (!message_id.is_valid() || !message_id.is_server()) {
+  if (!message_id.is_server()) {
     return promise.set_error(400, "Invalid message identifier specified");
   }
 
@@ -5294,7 +5309,7 @@ void ChatManager::update_channel(Channel *c, ChannelId channel_id, bool from_bin
   }
   if (c->is_stories_hidden_changed) {
     send_closure_later(td_->story_manager_actor_, &StoryManager::on_dialog_active_stories_order_updated,
-                       DialogId(channel_id), "update_channel stories_hidden");
+                       DialogId(channel_id), "update_channel stories_hidden", false);
     c->is_stories_hidden_changed = false;
   }
   auto unix_time = G()->unix_time();
@@ -5603,7 +5618,8 @@ void ChatManager::on_get_chat_full(tl_object_ptr<telegram_api::ChatFull> &&chat_
                          default_join_group_call_as_dialog_id, false);
     }
 
-    td_->messages_manager_->on_update_dialog_message_ttl(DialogId(chat_id), MessageTtl(chat->ttl_period_));
+    td_->messages_manager_->on_update_dialog_message_ttl(DialogId(chat_id),
+                                                         MessageTtl(chat->ttl_period_, "on_get_chat_full"));
 
     td_->messages_manager_->on_update_dialog_is_translatable(DialogId(chat_id), !chat->translations_disabled_);
 
@@ -5694,7 +5710,8 @@ void ChatManager::on_get_chat_full(tl_object_ptr<telegram_api::ChatFull> &&chat_
     td_->messages_manager_->on_update_dialog_pending_join_requests(DialogId(channel_id), channel->requests_pending_,
                                                                    std::move(channel->recent_requesters_));
 
-    td_->messages_manager_->on_update_dialog_message_ttl(DialogId(channel_id), MessageTtl(channel->ttl_period_));
+    td_->messages_manager_->on_update_dialog_message_ttl(DialogId(channel_id),
+                                                         MessageTtl(channel->ttl_period_, "on_get_channel_full"));
 
     td_->messages_manager_->on_update_dialog_view_as_messages(DialogId(channel_id), channel->view_forum_as_messages_);
 
@@ -5738,6 +5755,7 @@ void ChatManager::on_get_chat_full(tl_object_ptr<telegram_api::ChatFull> &&chat_
     auto gift_count = channel->stargifts_count_;
     auto has_stargifts_available = channel->stargifts_available_;
     auto has_paid_messages_available = channel->paid_messages_available_;
+    auto send_paid_message_stars = StarManager::get_star_count(channel->send_paid_messages_stars_);
     StickerSetId sticker_set_id;
     if (channel->stickerset_ != nullptr) {
       sticker_set_id =
@@ -5778,7 +5796,8 @@ void ChatManager::on_get_chat_full(tl_object_ptr<telegram_api::ChatFull> &&chat_
         channel_full->can_view_star_revenue != can_view_star_revenue ||
         channel_full->bot_verification != bot_verification ||
         channel_full->has_stargifts_available != has_stargifts_available ||
-        channel_full->has_paid_messages_available != has_paid_messages_available) {
+        channel_full->has_paid_messages_available != has_paid_messages_available ||
+        channel_full->send_paid_message_stars != send_paid_message_stars) {
       channel_full->participant_count = participant_count;
       channel_full->administrator_count = administrator_count;
       channel_full->restricted_count = restricted_count;
@@ -5804,6 +5823,7 @@ void ChatManager::on_get_chat_full(tl_object_ptr<telegram_api::ChatFull> &&chat_
       channel_full->bot_verification = std::move(bot_verification);
       channel_full->has_stargifts_available = has_stargifts_available;
       channel_full->has_paid_messages_available = has_paid_messages_available;
+      channel_full->send_paid_message_stars = StarManager::get_star_count(send_paid_message_stars);
 
       channel_full->is_changed = true;
     }
@@ -7375,10 +7395,10 @@ void ChatManager::on_update_channel_title(Channel *c, ChannelId channel_id, stri
 void ChatManager::on_update_channel_status(Channel *c, ChannelId channel_id, DialogParticipantStatus &&status) {
   if (c->is_monoforum) {
     if (status.is_member()) {
-      status = c->is_admined_monoforum
+      status = c->is_admined_monoforum && !td_->auth_manager_->is_bot()
                    ? DialogParticipantStatus::Administrator(
                          AdministratorRights(true, true, false, false, false, false, false, false, false, false, false,
-                                             false, false, false, false, ChannelType::Megagroup),
+                                             false, false, false, false, false, ChannelType::Megagroup),
                          string(), false)
                    : DialogParticipantStatus::Member(0);
     } else {
@@ -7453,7 +7473,7 @@ void ChatManager::on_channel_status_changed(Channel *c, ChannelId channel_id, co
       send_closure_later(td_->story_manager_actor_, &StoryManager::reload_dialog_expiring_stories, dialog_id);
     } else {
       send_closure_later(td_->story_manager_actor_, &StoryManager::on_dialog_active_stories_order_updated, dialog_id,
-                         "on_channel_status_changed");
+                         "on_channel_status_changed", false);
     }
 
     send_closure_later(G()->messages_manager(), &MessagesManager::force_create_dialog, dialog_id,
@@ -8421,7 +8441,7 @@ bool ChatManager::get_channel_can_be_deleted(const Channel *c) {
 }
 
 bool ChatManager::get_channel_join_to_send(const Channel *c) {
-  return c->join_to_send || !c->is_megagroup || !c->has_linked_channel;
+  return (c->join_to_send || !c->is_megagroup || !c->has_linked_channel) && !c->is_monoforum;
 }
 
 bool ChatManager::get_channel_join_request(ChannelId channel_id) const {
@@ -8433,7 +8453,7 @@ bool ChatManager::get_channel_join_request(ChannelId channel_id) const {
 }
 
 bool ChatManager::get_channel_join_request(const Channel *c) {
-  return c->join_request && c->is_megagroup && (is_channel_public(c) || c->has_linked_channel);
+  return c->join_request && c->is_megagroup && !c->is_monoforum && (is_channel_public(c) || c->has_linked_channel);
 }
 
 ChannelId ChatManager::get_channel_linked_channel_id(ChannelId channel_id, const char *source) {
@@ -8531,20 +8551,32 @@ bool ChatManager::get_channel(ChannelId channel_id, int left_tries, Promise<Unit
     return false;
   }
 
-  if (!have_channel(channel_id)) {
-    if (left_tries > 2 && G()->use_chat_info_database()) {
+  const Channel *c = get_channel(channel_id);
+  if (c == nullptr) {
+    if (left_tries > 3 && G()->use_chat_info_database()) {
       send_closure_later(actor_id(this), &ChatManager::load_channel_from_database, nullptr, channel_id,
                          std::move(promise));
       return false;
     }
 
-    if (left_tries > 1 && td_->auth_manager_->is_bot()) {
+    if (left_tries > 2 && td_->auth_manager_->is_bot()) {
       get_channel_queries_.add_query(channel_id.get(), std::move(promise), "get_channel");
       return false;
     }
 
     promise.set_error(400, "Supergroup not found");
     return false;
+  }
+  if (c->monoforum_channel_id.is_valid() && !have_channel(c->monoforum_channel_id)) {
+    if (left_tries > 2 && G()->use_chat_info_database()) {
+      send_closure_later(actor_id(this), &ChatManager::load_channel_from_database, nullptr, c->monoforum_channel_id,
+                         std::move(promise));
+      return false;
+    }
+    if (left_tries > 1 && td_->auth_manager_->is_bot()) {
+      get_channel_queries_.add_query(c->monoforum_channel_id.get(), std::move(promise), "get channel monoforum");
+      return false;
+    }
   }
 
   promise.set_value(Unit());
@@ -9081,12 +9113,17 @@ void ChatManager::on_get_channel(telegram_api::channel &channel, const char *sou
 
   bool is_admined_monoforum = false;
   if (monoforum_channel_id.is_valid()) {
-    Channel *monoforum_c = get_channel(monoforum_channel_id);
-    if (monoforum_c != nullptr) {
-      if (is_monoforum) {
-        is_admined_monoforum = monoforum_c->status.can_post_messages();
-      } else if (status.can_post_messages() && !monoforum_c->is_admined_monoforum) {
-        monoforum_c->is_admined_monoforum = true;
+    if (is_monoforum) {
+      Channel *monoforum_c = get_channel_force(monoforum_channel_id, source);
+      if (monoforum_c != nullptr) {
+        is_admined_monoforum = monoforum_c->status.can_manage_direct_messages();
+      } else if (status.is_member() && td_->auth_manager_->is_bot()) {
+        is_admined_monoforum = true;
+      }
+    } else {
+      Channel *monoforum_c = get_channel(monoforum_channel_id);
+      if (monoforum_c != nullptr && status.can_manage_direct_messages() != monoforum_c->is_admined_monoforum) {
+        monoforum_c->is_admined_monoforum = status.can_manage_direct_messages();
         monoforum_c->is_admined_monoforum_changed = true;
         monoforum_c->is_changed = true;
         update_channel(monoforum_c, monoforum_channel_id);
@@ -9431,7 +9468,7 @@ td_api::object_ptr<td_api::updateSupergroup> ChatManager::get_update_unknown_sup
   return td_api::make_object<td_api::updateSupergroup>(td_api::make_object<td_api::supergroup>(
       channel_id.get(), nullptr, 0, DialogParticipantStatus::Banned(0).get_chat_member_status_object(), 0, 0, false,
       false, false, false, false, !is_megagroup, false, false, !is_megagroup, false, false, false, false, nullptr,
-      false, false, false, string(), 0, false, false));
+      false, false, nullptr, 0, false, false));
 }
 
 int64 ChatManager::get_supergroup_id_object(ChannelId channel_id, const char *source) const {
@@ -9472,10 +9509,8 @@ td_api::object_ptr<td_api::supergroup> ChatManager::get_supergroup_object(Channe
       c->has_linked_channel, c->has_location, c->sign_messages, c->show_message_sender, get_channel_join_to_send(c),
       get_channel_join_request(c), c->is_slow_mode_enabled, !c->is_megagroup, c->is_gigagroup, c->is_forum,
       c->is_monoforum, c->is_admined_monoforum, get_channel_verification_status_object(c),
-      c->broadcast_messages_allowed, c->is_forum_tabs,
-      get_restriction_reason_has_sensitive_content(c->restriction_reasons),
-      get_restriction_reason_description(c->restriction_reasons), c->paid_message_star_count,
-      c->max_active_story_id.is_valid(), get_channel_has_unread_stories(c));
+      c->broadcast_messages_allowed, c->is_forum_tabs, get_restriction_info_object(c->restriction_reasons),
+      c->paid_message_star_count, c->max_active_story_id.is_valid(), get_channel_has_unread_stories(c));
 }
 
 tl_object_ptr<td_api::supergroupFullInfo> ChatManager::get_supergroup_full_info_object(ChannelId channel_id) const {
@@ -9510,8 +9545,9 @@ tl_object_ptr<td_api::supergroupFullInfo> ChatManager::get_supergroup_full_info_
       can_toggle_channel_aggressive_anti_spam(channel_id, channel_full).is_ok(), channel_full->is_all_history_available,
       channel_full->can_have_sponsored_messages, channel_full->has_aggressive_anti_spam_enabled,
       channel_full->has_paid_media_allowed, channel_full->has_pinned_stories, channel_full->gift_count,
-      channel_full->boost_count, channel_full->unrestrict_boost_count, channel_full->sticker_set_id.get(),
-      channel_full->emoji_sticker_set_id.get(), channel_full->location.get_chat_location_object(),
+      channel_full->boost_count, channel_full->unrestrict_boost_count, channel_full->send_paid_message_stars,
+      channel_full->sticker_set_id.get(), channel_full->emoji_sticker_set_id.get(),
+      channel_full->location.get_chat_location_object(),
       channel_full->invite_link.get_chat_invite_link_object(td_->user_manager_.get()), std::move(bot_commands),
       std::move(bot_verification),
       get_basic_group_id_object(channel_full->migrated_from_chat_id, "get_supergroup_full_info_object"),

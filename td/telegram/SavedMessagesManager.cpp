@@ -22,6 +22,7 @@
 #include "td/telegram/MessageTopic.h"
 #include "td/telegram/OptionManager.h"
 #include "td/telegram/ServerMessageId.h"
+#include "td/telegram/StarManager.h"
 #include "td/telegram/Td.h"
 #include "td/telegram/telegram_api.h"
 #include "td/telegram/UserManager.h"
@@ -448,6 +449,68 @@ class ReadSavedHistoryQuery final : public Td::ResultHandler {
   }
 };
 
+class GetMonoforumPaidMessageRevenueQuery final : public Td::ResultHandler {
+  Promise<td_api::object_ptr<td_api::starCount>> promise_;
+
+ public:
+  explicit GetMonoforumPaidMessageRevenueQuery(Promise<td_api::object_ptr<td_api::starCount>> &&promise)
+      : promise_(std::move(promise)) {
+  }
+
+  void send(DialogId dialog_id, telegram_api::object_ptr<telegram_api::InputUser> &&input_user) {
+    int32 flags = telegram_api::account_getPaidMessagesRevenue::PARENT_PEER_MASK;
+    auto parent_input_peer = td_->dialog_manager_->get_input_peer(dialog_id, AccessRights::Write);
+    CHECK(parent_input_peer != nullptr);
+    send_query(G()->net_query_creator().create(
+        telegram_api::account_getPaidMessagesRevenue(flags, std::move(parent_input_peer), std::move(input_user))));
+  }
+
+  void on_result(BufferSlice packet) final {
+    auto result_ptr = fetch_result<telegram_api::account_getPaidMessagesRevenue>(packet);
+    if (result_ptr.is_error()) {
+      return on_error(result_ptr.move_as_error());
+    }
+
+    auto ptr = result_ptr.move_as_ok();
+    LOG(DEBUG) << "Receive result for GetMonoforumPaidMessageRevenueQuery: " << to_string(ptr);
+    promise_.set_value(td_api::make_object<td_api::starCount>(StarManager::get_star_count(ptr->stars_amount_)));
+  }
+
+  void on_error(Status status) final {
+    promise_.set_error(std::move(status));
+  }
+};
+
+class AddMonoforumNoPaidMessageExceptionQuery final : public Td::ResultHandler {
+  Promise<Unit> promise_;
+
+ public:
+  explicit AddMonoforumNoPaidMessageExceptionQuery(Promise<Unit> &&promise) : promise_(std::move(promise)) {
+  }
+
+  void send(DialogId dialog_id, telegram_api::object_ptr<telegram_api::InputUser> &&input_user, bool require_payment,
+            bool refund_charged) {
+    int32 flags = telegram_api::account_toggleNoPaidMessagesException::PARENT_PEER_MASK;
+    auto parent_input_peer = td_->dialog_manager_->get_input_peer(dialog_id, AccessRights::Write);
+    CHECK(parent_input_peer != nullptr);
+    send_query(G()->net_query_creator().create(telegram_api::account_toggleNoPaidMessagesException(
+        flags, refund_charged, require_payment, std::move(parent_input_peer), std::move(input_user))));
+  }
+
+  void on_result(BufferSlice packet) final {
+    auto result_ptr = fetch_result<telegram_api::account_toggleNoPaidMessagesException>(packet);
+    if (result_ptr.is_error()) {
+      return on_error(result_ptr.move_as_error());
+    }
+
+    promise_.set_value(Unit());
+  }
+
+  void on_error(Status status) final {
+    promise_.set_error(std::move(status));
+  }
+};
+
 class GetMessageAuthorQuery final : public Td::ResultHandler {
   Promise<td_api::object_ptr<td_api::user>> promise_;
   ChannelId channel_id_;
@@ -500,6 +563,10 @@ SavedMessagesTopicId SavedMessagesManager::get_topic_id(DialogId dialog_id, int6
   }
   auto saved_messages_topic_id = SavedMessagesTopicId(DialogId(topic_id));
   if (td_->auth_manager_->is_bot() && saved_messages_topic_id.is_valid_in(td_, dialog_id).is_ok()) {
+    return saved_messages_topic_id;
+  }
+  if (dialog_id == DialogId() &&
+      saved_messages_topic_id.is_valid_in(td_, td_->dialog_manager_->get_my_dialog_id()).is_ok()) {
     return saved_messages_topic_id;
   }
   if (get_topic(dialog_id, saved_messages_topic_id) == nullptr) {
@@ -564,6 +631,7 @@ SavedMessagesManager::SavedMessagesTopic *SavedMessagesManager::get_topic(
 
 const SavedMessagesManager::SavedMessagesTopic *SavedMessagesManager::get_topic(
     const TopicList *topic_list, SavedMessagesTopicId saved_messages_topic_id) {
+  CHECK(topic_list != nullptr);
   auto it = topic_list->topics_.find(saved_messages_topic_id);
   if (it == topic_list->topics_.end()) {
     return nullptr;
@@ -575,6 +643,7 @@ SavedMessagesManager::SavedMessagesTopic *SavedMessagesManager::add_topic(TopicL
                                                                           SavedMessagesTopicId saved_messages_topic_id,
                                                                           bool from_server) {
   CHECK(!td_->auth_manager_->is_bot());
+  CHECK(topic_list != nullptr);
   CHECK(saved_messages_topic_id.is_valid());
   auto my_dialog_id = td_->dialog_manager_->get_my_dialog_id();
   bool is_saved_messages = topic_list->dialog_id_ == DialogId();
@@ -691,6 +760,22 @@ void SavedMessagesManager::do_set_topic_is_marked_as_unread(SavedMessagesTopic *
   topic->is_changed_ = true;
 }
 
+void SavedMessagesManager::do_set_topic_nopaid_messages_exception(SavedMessagesTopic *topic,
+                                                                  bool nopaid_messages_exception) {
+  if (td_->auth_manager_->is_bot()) {
+    return;
+  }
+
+  if (topic->nopaid_messages_exception_ == nopaid_messages_exception) {
+    return;
+  }
+
+  LOG(INFO) << "Set can_send_unpaid_messages in " << topic->saved_messages_topic_id_ << " of " << topic->dialog_id_
+            << " to " << nopaid_messages_exception;
+  topic->nopaid_messages_exception_ = nopaid_messages_exception;
+  topic->is_changed_ = true;
+}
+
 void SavedMessagesManager::do_set_topic_unread_reaction_count(SavedMessagesTopic *topic, int32 unread_reaction_count) {
   if (td_->auth_manager_->is_bot()) {
     return;
@@ -774,7 +859,7 @@ void SavedMessagesManager::on_topic_message_added(DialogId dialog_id, SavedMessa
 
 void SavedMessagesManager::on_topic_message_updated(DialogId dialog_id, SavedMessagesTopicId saved_messages_topic_id,
                                                     MessageId message_id) {
-  if (td_->auth_manager_->is_bot()) {
+  if (td_->auth_manager_->is_bot() || message_id.is_scheduled()) {
     return;
   }
   CHECK(message_id.is_valid());
@@ -1090,6 +1175,31 @@ void SavedMessagesManager::on_update_read_monoforum_outbox(DialogId dialog_id,
   on_topic_changed(topic_list, topic, "on_update_read_monoforum_outbox");
 }
 
+void SavedMessagesManager::on_update_monoforum_nopaid_messages_exception(DialogId dialog_id,
+                                                                         SavedMessagesTopicId saved_messages_topic_id,
+                                                                         bool nopaid_messages_exception) {
+  if (td_->auth_manager_->is_bot()) {
+    return;
+  }
+
+  auto *topic_list = get_topic_list(dialog_id);
+  if (topic_list == nullptr) {
+    return;
+  }
+  auto *topic = get_topic(topic_list, saved_messages_topic_id);
+  if (topic == nullptr) {
+    return;
+  }
+  if (topic->dialog_id_ != dialog_id) {
+    LOG(ERROR) << "Can't update can_send_unpaid_messages in a topic of " << dialog_id;
+    return;
+  }
+
+  do_set_topic_nopaid_messages_exception(topic, nopaid_messages_exception);
+
+  on_topic_changed(topic_list, topic, "on_update_monoforum_nopaid_messages_exception");
+}
+
 void SavedMessagesManager::on_update_topic_draft_message(
     DialogId dialog_id, SavedMessagesTopicId saved_messages_topic_id,
     telegram_api::object_ptr<telegram_api::DraftMessage> &&draft_message, int32 try_count) {
@@ -1187,6 +1297,7 @@ int64 SavedMessagesManager::get_topic_order(int32 message_date, MessageId messag
 }
 
 int64 SavedMessagesManager::get_topic_public_order(const TopicList *topic_list, const SavedMessagesTopic *topic) {
+  CHECK(topic_list != nullptr);
   if (TopicDate(topic->private_order_, topic->saved_messages_topic_id_) <= topic_list->last_topic_date_) {
     return topic->private_order_;
   }
@@ -1194,6 +1305,7 @@ int64 SavedMessagesManager::get_topic_public_order(const TopicList *topic_list, 
 }
 
 void SavedMessagesManager::on_topic_changed(TopicList *topic_list, SavedMessagesTopic *topic, const char *source) {
+  CHECK(topic_list != nullptr);
   CHECK(topic != nullptr);
   if (!topic->is_changed_) {
     return;
@@ -1320,6 +1432,7 @@ SavedMessagesManager::TopicList *SavedMessagesManager::add_topic_list(DialogId d
   if (check_monoforum_dialog_id(dialog_id).is_error()) {
     return nullptr;
   }
+  CHECK(dialog_id.is_valid());
   auto &topic_list = monoforum_topic_lists_[dialog_id];
   if (topic_list == nullptr) {
     topic_list = make_unique<TopicList>();
@@ -1340,6 +1453,7 @@ void SavedMessagesManager::load_saved_messages_topics(int32 limit, Promise<Unit>
 }
 
 void SavedMessagesManager::load_topics(TopicList *topic_list, int32 limit, Promise<Unit> &&promise) {
+  CHECK(topic_list != nullptr);
   if (limit < 0) {
     return promise.set_error(400, "Limit must be non-negative");
   }
@@ -1376,6 +1490,7 @@ void SavedMessagesManager::on_get_pinned_saved_dialogs(Result<Unit> &&result) {
 }
 
 void SavedMessagesManager::get_saved_dialogs(TopicList *topic_list, int32 limit, Promise<Unit> &&promise) {
+  CHECK(topic_list != nullptr);
   topic_list->load_queries_.push_back(std::move(promise));
   if (topic_list->load_queries_.size() == 1) {
     auto query_promise = PromiseCreator::lambda([actor_id = actor_id(this), topic_list](Result<Unit> &&result) {
@@ -1412,6 +1527,7 @@ SavedMessagesManager::SavedMessagesTopicInfo SavedMessagesManager::get_saved_mes
     result.unread_count_ = max(0, dialog->unread_count_);
     result.unread_reaction_count_ = dialog->unread_reactions_count_;
     result.is_marked_as_unread_ = dialog->unread_mark_;
+    result.nopaid_messages_exception_ = dialog->nopaid_messages_exception_;
     result.draft_message_ = get_draft_message(td, std::move(dialog->draft_));
   }
   return result;
@@ -1419,6 +1535,7 @@ SavedMessagesManager::SavedMessagesTopicInfo SavedMessagesManager::get_saved_mes
 
 void SavedMessagesManager::on_get_saved_dialogs(TopicList *topic_list, Result<Unit> &&result) {
   G()->ignore_result_if_closing(result);
+  CHECK(topic_list != nullptr);
   if (result.is_error()) {
     fail_promises(topic_list->load_queries_, result.move_as_error());
   } else {
@@ -1623,6 +1740,7 @@ void SavedMessagesManager::process_saved_messages_topics(
       do_set_topic_read_outbox_max_message_id(topic, topic_info.read_outbox_max_message_id_);
       do_set_topic_unread_reaction_count(topic, topic_info.unread_reaction_count_);
       do_set_topic_is_marked_as_unread(topic, topic_info.is_marked_as_unread_);
+      do_set_topic_nopaid_messages_exception(topic, topic_info.nopaid_messages_exception_);
       do_set_topic_draft_message(topic, std::move(topic_info.draft_message_), true);
     }
     on_topic_changed(topic_list, topic, "on_get_saved_messages_topics");
@@ -1697,6 +1815,7 @@ td_api::object_ptr<td_api::updateSavedMessagesTopic> SavedMessagesManager::get_u
 
 td_api::object_ptr<td_api::directMessagesChatTopic> SavedMessagesManager::get_direct_messages_chat_topic_object(
     const TopicList *topic_list, const SavedMessagesTopic *topic) const {
+  CHECK(topic_list != nullptr);
   CHECK(topic != nullptr);
   CHECK(topic->dialog_id_ != DialogId());
   td_api::object_ptr<td_api::message> last_message_object;
@@ -1708,9 +1827,10 @@ td_api::object_ptr<td_api::directMessagesChatTopic> SavedMessagesManager::get_di
       td_->dialog_manager_->get_chat_id_object(topic->dialog_id_, "directMessagesChatTopic"),
       topic->saved_messages_topic_id_.get_unique_id(),
       topic->saved_messages_topic_id_.get_monoforum_message_sender_object(td_),
-      get_topic_public_order(topic_list, topic), topic->is_marked_as_unread_, topic->unread_count_,
-      topic->read_inbox_max_message_id_.get(), topic->read_outbox_max_message_id_.get(), topic->unread_reaction_count_,
-      std::move(last_message_object), get_draft_message_object(td_, topic->draft_message_));
+      get_topic_public_order(topic_list, topic), topic->nopaid_messages_exception_, topic->is_marked_as_unread_,
+      topic->unread_count_, topic->read_inbox_max_message_id_.get(), topic->read_outbox_max_message_id_.get(),
+      topic->unread_reaction_count_, std::move(last_message_object),
+      get_draft_message_object(td_, topic->draft_message_));
 }
 
 td_api::object_ptr<td_api::updateDirectMessagesChatTopic>
@@ -1722,6 +1842,7 @@ SavedMessagesManager::get_update_direct_messages_chat_topic_object(const TopicLi
 
 void SavedMessagesManager::send_update_saved_messages_topic(const TopicList *topic_list,
                                                             const SavedMessagesTopic *topic, const char *source) const {
+  CHECK(topic_list != nullptr);
   CHECK(topic != nullptr);
   LOG(INFO) << "Send update about " << topic->saved_messages_topic_id_ << " in " << topic->dialog_id_ << " with order "
             << get_topic_public_order(topic_list, topic) << " and last " << topic->last_message_id_ << " sent at "
@@ -1746,7 +1867,11 @@ SavedMessagesManager::get_update_saved_messages_topic_count_object() const {
 }
 
 void SavedMessagesManager::update_saved_messages_topic_sent_total_count(TopicList *topic_list, const char *source) {
-  if (td_->auth_manager_->is_bot() || topic_list->dialog_id_ != DialogId()) {
+  if (td_->auth_manager_->is_bot()) {
+    return;
+  }
+  CHECK(topic_list != nullptr);
+  if (topic_list->dialog_id_ != DialogId()) {
     return;
   }
   if (topic_list->server_total_count_ == -1) {
@@ -1853,6 +1978,7 @@ bool SavedMessagesManager::set_saved_messages_topic_is_pinned(SavedMessagesTopic
 }
 
 void SavedMessagesManager::set_last_topic_date(TopicList *topic_list, TopicDate topic_date) {
+  CHECK(topic_list != nullptr);
   if (topic_date <= topic_list->last_topic_date_) {
     return;
   }
@@ -1976,8 +2102,6 @@ void SavedMessagesManager::get_topic_history(DialogId dialog_id, SavedMessagesTo
     return promise.set_error(400, "Parameter offset must be greater than or equal to -limit");
   }
 
-  TRY_STATUS_PROMISE(promise, saved_messages_topic_id.is_valid_in(td_, dialog_id));
-
   if (from_message_id == MessageId() || from_message_id.get() > MessageId::max().get()) {
     from_message_id = MessageId::max();
     limit += offset;
@@ -1996,6 +2120,8 @@ void SavedMessagesManager::do_get_topic_history(const TopicList *topic_list, con
                                                 DialogId dialog_id, SavedMessagesTopicId saved_messages_topic_id,
                                                 MessageId from_message_id, int32 offset, int32 limit, int32 left_tries,
                                                 Promise<td_api::object_ptr<td_api::messages>> &&promise) {
+  TRY_STATUS_PROMISE(promise, saved_messages_topic_id.is_valid_in(td_, dialog_id));
+
   CHECK(topic_list != nullptr);
   int32 total_count = -1;
   vector<MessageId> message_ids;
@@ -2057,17 +2183,20 @@ void SavedMessagesManager::on_get_topic_history(DialogId dialog_id, uint32 gener
   if (topic_list->generation_ != generation) {
     return promise.set_error(400, "Topic was deleted");
   }
-  auto *topic = add_topic(topic_list, saved_messages_topic_id, false);
 
   if (r_info.is_error()) {
     return promise.set_error(r_info.move_as_error());
   }
   auto info = r_info.move_as_ok();
-
-  if (!MessageId::is_message_id_order_descending(info.messages)) {
+  if (info.messages.empty() && get_topic(topic_list, saved_messages_topic_id) == nullptr) {
+    return promise.set_value(
+        td_->messages_manager_->get_messages_object(0, dialog_id, {}, true, "on_get_topic_history"));
+  }
+  if (!MessageId::is_message_id_order_descending(info.messages, "on_get_topic_history")) {
     return promise.set_error(500, "Receive invalid response");
   }
 
+  auto *topic = add_topic(topic_list, saved_messages_topic_id, false);
   MessageId first_message_id;
   MessageId last_message_id;
   int32 last_message_date = 0;
@@ -2322,7 +2451,7 @@ Status SavedMessagesManager::set_monoforum_topic_draft_message(
     if (!is_local_draft_message(topic->draft_message_)) {
       save_draft_message(td_, dialog_id, saved_messages_topic_id, topic->draft_message_, Auto());
     }
-    on_topic_changed(topic_list, topic, "set_monoforum_topic_is_marked_as_unread");
+    on_topic_changed(topic_list, topic, "set_monoforum_topic_draft_message");
   }
   return Status::OK();
 }
@@ -2376,6 +2505,49 @@ void SavedMessagesManager::read_all_monoforum_topic_reactions(DialogId dialog_id
   on_topic_changed(topic_list, topic, "read_all_monoforum_topic_reactions");
 }
 
+void SavedMessagesManager::get_monoforum_topic_revenue(DialogId dialog_id, SavedMessagesTopicId saved_messages_topic_id,
+                                                       Promise<td_api::object_ptr<td_api::starCount>> &&promise) {
+  auto *topic_list = get_topic_list(dialog_id);
+  if (topic_list == nullptr) {
+    return promise.set_error(400, "Topic not found");
+  }
+  auto *topic = get_topic(topic_list, saved_messages_topic_id);
+  if (topic == nullptr) {
+    return promise.set_error(400, "Topic not found");
+  }
+  if (topic->dialog_id_ != dialog_id) {
+    return promise.set_error(400, "Topic messages can't be paid");
+  }
+  TRY_RESULT_PROMISE(promise, input_user, saved_messages_topic_id.get_input_user(td_));
+  td_->create_handler<GetMonoforumPaidMessageRevenueQuery>(std::move(promise))->send(dialog_id, std::move(input_user));
+}
+
+void SavedMessagesManager::toggle_monoforum_topic_nopaid_messages_exception(
+    DialogId dialog_id, SavedMessagesTopicId saved_messages_topic_id, bool nopaid_messages_exception,
+    bool refund_payments, Promise<Unit> &&promise) {
+  auto *topic_list = get_topic_list(dialog_id);
+  if (topic_list == nullptr) {
+    return promise.set_error(400, "Topic not found");
+  }
+  auto *topic = get_topic(topic_list, saved_messages_topic_id);
+  if (topic == nullptr) {
+    return promise.set_error(400, "Topic not found");
+  }
+  if (topic->dialog_id_ != dialog_id) {
+    return promise.set_error(400, "Topic messages can't be paid");
+  }
+  TRY_RESULT_PROMISE(promise, input_user, saved_messages_topic_id.get_input_user(td_));
+
+  do_set_topic_nopaid_messages_exception(topic, nopaid_messages_exception);
+  if (!topic->is_changed_ && !refund_payments) {
+    return promise.set_value(Unit());
+  }
+  on_topic_changed(topic_list, topic, "read_all_monoforum_topic_reactions");
+
+  td_->create_handler<AddMonoforumNoPaidMessageExceptionQuery>(std::move(promise))
+      ->send(dialog_id, std::move(input_user), !nopaid_messages_exception, refund_payments);
+}
+
 void SavedMessagesManager::get_monoforum_message_author(MessageFullId message_full_id,
                                                         Promise<td_api::object_ptr<td_api::user>> &&promise) {
   auto dialog_id = message_full_id.get_dialog_id();
@@ -2384,7 +2556,7 @@ void SavedMessagesManager::get_monoforum_message_author(MessageFullId message_fu
     return promise.set_error(400, "Message not found");
   }
   auto message_id = message_full_id.get_message_id();
-  if (!message_id.is_valid() || !message_id.is_server()) {
+  if (!message_id.is_server()) {
     return promise.set_error(400, "Can't get message author");
   }
 

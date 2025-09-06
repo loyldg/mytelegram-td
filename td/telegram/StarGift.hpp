@@ -35,6 +35,10 @@ void StarGift::store(StorerT &storer) const {
   bool has_owner_address = !owner_address_.empty();
   bool has_gift_address = !gift_address_.empty();
   bool has_resale_star_count = resale_star_count_ != 0;
+  bool has_released_by_dialog_id = released_by_dialog_id_.is_valid();
+  bool has_per_user_remains = per_user_remains_ != 0;
+  bool has_per_user_total = per_user_total_ != 0;
+  bool has_resale_ton_count = resale_ton_count_ != 0;
   BEGIN_STORE_FLAGS();
   STORE_FLAG(is_limited);
   STORE_FLAG(has_default_sell_star_count);
@@ -51,6 +55,12 @@ void StarGift::store(StorerT &storer) const {
   STORE_FLAG(has_owner_address);
   STORE_FLAG(has_gift_address);
   STORE_FLAG(has_resale_star_count);
+  STORE_FLAG(has_released_by_dialog_id);
+  STORE_FLAG(is_premium_);
+  STORE_FLAG(has_per_user_remains);
+  STORE_FLAG(has_per_user_total);
+  STORE_FLAG(resale_ton_only_);
+  STORE_FLAG(has_resale_ton_count);
   END_STORE_FLAGS();
   td::store(id_, storer);
   if (!is_unique_) {
@@ -102,6 +112,18 @@ void StarGift::store(StorerT &storer) const {
     if (has_resale_star_count) {
       td::store(resale_star_count_, storer);
     }
+    if (has_resale_ton_count) {
+      td::store(resale_ton_count_, storer);
+    }
+  }
+  if (has_released_by_dialog_id) {
+    td::store(released_by_dialog_id_, storer);
+  }
+  if (has_per_user_remains) {
+    td::store(per_user_remains_, storer);
+  }
+  if (has_per_user_total) {
+    td::store(per_user_total_, storer);
   }
 }
 
@@ -121,6 +143,10 @@ void StarGift::parse(ParserT &parser) {
   bool has_owner_address;
   bool has_gift_address;
   bool has_resale_star_count;
+  bool has_released_by_dialog_id;
+  bool has_per_user_remains;
+  bool has_per_user_total;
+  bool has_resale_ton_count;
   BEGIN_PARSE_FLAGS();
   PARSE_FLAG(is_limited);
   PARSE_FLAG(has_default_sell_star_count);
@@ -137,6 +163,12 @@ void StarGift::parse(ParserT &parser) {
   PARSE_FLAG(has_owner_address);
   PARSE_FLAG(has_gift_address);
   PARSE_FLAG(has_resale_star_count);
+  PARSE_FLAG(has_released_by_dialog_id);
+  PARSE_FLAG(is_premium_);
+  PARSE_FLAG(has_per_user_remains);
+  PARSE_FLAG(has_per_user_total);
+  PARSE_FLAG(resale_ton_only_);
+  PARSE_FLAG(has_resale_ton_count);
   END_PARSE_FLAGS();
   td::parse(id_, parser);
   if (!is_unique_) {
@@ -195,6 +227,18 @@ void StarGift::parse(ParserT &parser) {
     if (has_resale_star_count) {
       td::parse(resale_star_count_, parser);
     }
+    if (has_resale_ton_count) {
+      td::parse(resale_ton_count_, parser);
+    }
+  }
+  if (has_released_by_dialog_id) {
+    td::parse(released_by_dialog_id_, parser);
+  }
+  if (has_per_user_remains) {
+    td::parse(per_user_remains_, parser);
+  }
+  if (has_per_user_total) {
+    td::parse(per_user_total_, parser);
   }
 }
 

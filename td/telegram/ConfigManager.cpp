@@ -6,6 +6,8 @@
 //
 #include "td/telegram/ConfigManager.h"
 
+#include "td/telegram/AccountManager.h"
+#include "td/telegram/AgeVerificationParameters.h"
 #include "td/telegram/AuthManager.h"
 #include "td/telegram/ConnectionState.h"
 #include "td/telegram/Global.h"
@@ -1355,6 +1357,10 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
   int32 freeze_until_date = 0;
   string freeze_appeal_url;
   bool can_accept_calls = true;
+  bool need_age_video_verification = false;
+  string verify_age_bot_username;
+  string verify_age_country;
+  int32 verify_age_min = 0;
 
   static const FlatHashMap<Slice, Slice, SliceHash> integer_keys = {
       {"authorization_autoconfirm_period", ""},
@@ -1400,6 +1406,8 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
       {"ringtone_duration_max", "notification_sound_duration_max"},
       {"ringtone_saved_count_max", "notification_sound_count_max"},
       {"ringtone_size_max", "notification_sound_size_max"},
+      {"stargifts_collection_gifts_limit", "gift_collection_gift_count_max"},
+      {"stargifts_collections_limit", "gift_collection_count_max"},
       {"stargifts_convert_period_max", "gift_sell_period"},
       {"stargifts_message_length_max", "gift_text_length_max"},
       {"stargifts_pinned_to_top_limit", "pinned_gift_count_max"},
@@ -1411,14 +1419,23 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
       {"stars_paid_post_amount_max", "paid_media_message_star_count_max"},
       {"stars_paid_reaction_amount_max", "paid_reaction_star_count_max"},
       {"stars_revenue_withdrawal_min", "star_withdrawal_count_min"},
+      {"stars_revenue_withdrawal_max", "star_withdrawal_count_max"},
       {"stars_stargift_resale_amount_max", "gift_resale_star_count_max"},
       {"stars_stargift_resale_amount_min", "gift_resale_star_count_min"},
-      {"stars_stargift_resale_commission_permille", "gift_resale_earnings_per_mille"},
+      {"stars_stargift_resale_commission_permille", "gift_resale_star_earnings_per_mille"},
       {"stars_subscription_amount_max", "subscription_star_count_max"},
+      {"stars_suggested_post_age_min", "suggested_post_lifetime_min"},
+      {"stars_suggested_post_amount_min", "suggested_post_star_count_min"},
+      {"stars_suggested_post_amount_max", "suggested_post_star_count_max"},
+      {"stars_suggested_post_commission_permille", "suggested_post_star_earnings_per_mille"},
+      {"stars_suggested_post_future_min", "suggested_post_send_delay_min"},
+      {"stars_suggested_post_future_max", "suggested_post_send_delay_max"},
       {"stars_usd_sell_rate_x1000", "usd_to_thousand_star_rate"},
       {"stars_usd_withdraw_rate_x1000", "thousand_star_to_usd_rate"},
       {"stickers_premium_by_emoji_num", ""},
       {"stickers_normal_by_emoji_per_premium_num", ""},
+      {"stories_album_stories_limit", "story_album_story_count_max"},
+      {"stories_albums_limit", "story_album_count_max"},
       {"stories_area_url_max", "story_link_area_count_max"},
       {"stories_pinned_to_top_count_max", "pinned_story_count_max"},
       {"stories_stealth_cooldown_period", "story_stealth_mode_cooldown_period"},
@@ -1426,28 +1443,46 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
       {"stories_stealth_past_period", "story_stealth_mode_past_period"},
       {"story_viewers_expire_period", "story_viewers_expiration_delay"},
       {"telegram_antispam_group_size_min", "aggressive_anti_spam_supergroup_member_count_min"},
+      {"todo_items_max", "checklist_task_count_max"},
+      {"todo_item_length_max", "checklist_task_text_length_max"},
+      {"todo_title_length_max", "checklist_title_length_max"},
+      {"ton_stargift_resale_commission_permille", "gift_resale_toncoin_earnings_per_mille"},
+      {"ton_suggested_post_commission_permille", "suggested_post_toncoin_earnings_per_mille"},
       {"topics_pinned_limit", "pinned_forum_topic_count_max"},
       {"upload_premium_speedup_download", "premium_download_speedup"},
       {"upload_premium_speedup_notify_period", ""},
       {"upload_premium_speedup_upload", "premium_upload_speedup"}};
+  static const FlatHashMap<Slice, Slice, SliceHash> long_keys = {
+      {"telegram_antispam_user_id", "anti_spam_bot_user_id"},
+      {"stories_changelog_user_id", "stories_changelog_user_id"}};
   static const FlatHashSet<Slice, SliceHash> ignored_options(
       {"default_emoji_statuses_stickerset_id", "forum_upgrade_participants_min", "getfile_experimental_params",
        "message_animated_emoji_max", "stickers_emoji_cache_time", "stories_export_nopublic_link", "test",
        "upload_max_fileparts_default", "upload_max_fileparts_premium", "channel_color_level_min",
        "groupcall_video_participants_max", "story_expire_period", "stories_posting",
        "giveaway_gifts_purchase_available", "stars_purchase_blocked", "stargifts_blocked", "starref_program_allowed",
-       "starref_connect_allowed", "qr_login_code", "dialog_filters_enabled",
+       "starref_connect_allowed", "qr_login_camera", "qr_login_code", "dialog_filters_enabled",
        //
        "dialog_filters_tooltip"});
   if (config->get_id() == telegram_api::jsonObject::ID) {
     for (auto &key_value : static_cast<telegram_api::jsonObject *>(config.get())->value_) {
       Slice key = key_value->key_;
 
-      auto it = integer_keys.find(key);
-      if (it != integer_keys.end()) {
-        G()->set_option_integer(it->second.empty() ? key : it->second,
-                                max(0, get_json_value_int(std::move(key_value->value_), key)));
-        continue;
+      {
+        auto it = integer_keys.find(key);
+        if (it != integer_keys.end()) {
+          G()->set_option_integer(it->second.empty() ? key : it->second,
+                                  max(0, get_json_value_int(std::move(key_value->value_), key)));
+          continue;
+        }
+      }
+      {
+        auto it = long_keys.find(key);
+        if (it != long_keys.end()) {
+          G()->set_option_integer(it->second.empty() ? key : it->second,
+                                  max(static_cast<int64>(0), get_json_value_long(std::move(key_value->value_), key)));
+          continue;
+        }
       }
       if (ignored_options.count(key)) {
         continue;
@@ -1750,14 +1785,6 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
         premium_gift_text_field_icon = get_json_value_bool(std::move(key_value->value_), key);
         continue;
       }
-      if (key == "telegram_antispam_user_id") {
-        G()->set_option_integer("anti_spam_bot_user_id", get_json_value_long(std::move(key_value->value_), key));
-        continue;
-      }
-      if (key == "stories_changelog_user_id") {
-        G()->set_option_integer("stories_changelog_user_id", get_json_value_long(std::move(key_value->value_), key));
-        continue;
-      }
       if (key == "stories_all_hidden") {
         // archive_all_stories = get_json_value_bool(std::move(key_value->value_), key);
         continue;
@@ -1889,6 +1916,55 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
         can_accept_calls = !get_json_value_bool(std::move(key_value->value_), key);
         continue;
       }
+      if (key == "ton_suggested_post_amount_min") {
+        G()->set_option_integer("suggested_post_toncoin_cent_count_min",
+                                get_json_value_long(std::move(key_value->value_), key) / 10000000);
+        continue;
+      }
+      if (key == "ton_suggested_post_amount_max") {
+        G()->set_option_integer("suggested_post_toncoin_cent_count_max",
+                                get_json_value_long(std::move(key_value->value_), key) / 10000000);
+        continue;
+      }
+      if (key == "ton_stargift_resale_amount_min") {
+        G()->set_option_integer("gift_resale_toncoin_cent_count_min",
+                                get_json_value_long(std::move(key_value->value_), key) / 10000000);
+        continue;
+      }
+      if (key == "ton_stargift_resale_amount_max") {
+        G()->set_option_integer("gift_resale_toncoin_cent_count_max",
+                                get_json_value_long(std::move(key_value->value_), key) / 10000000);
+        continue;
+      }
+      if (key == "ton_usd_rate") {
+        G()->set_option_integer("million_toncoin_to_usd_rate",
+                                static_cast<int64>(get_json_value_double(std::move(key_value->value_), key) * 1000000));
+        continue;
+      }
+      if (key == "ton_topup_url") {
+        G()->set_option_string("toncoin_top_up_url", get_json_value_string(std::move(key_value->value_), key));
+        continue;
+      }
+      if (key == "stars_rating_learnmore_url") {
+        G()->set_option_string("user_rating_learn_more_url", get_json_value_string(std::move(key_value->value_), key));
+        continue;
+      }
+      if (key == "need_age_video_verification") {
+        need_age_video_verification = get_json_value_bool(std::move(key_value->value_), key);
+        continue;
+      }
+      if (key == "verify_age_bot_username") {
+        verify_age_bot_username = get_json_value_string(std::move(key_value->value_), key);
+        continue;
+      }
+      if (key == "verify_age_country") {
+        verify_age_country = get_json_value_string(std::move(key_value->value_), key);
+        continue;
+      }
+      if (key == "verify_age_min") {
+        verify_age_min = get_json_value_int(std::move(key_value->value_), key);
+        continue;
+      }
 
       new_values.push_back(std::move(key_value));
     }
@@ -1906,6 +1982,10 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
 
   send_closure(G()->user_manager(), &UserManager::on_update_freeze_state, freeze_since_date, freeze_until_date,
                std::move(freeze_appeal_url));
+
+  send_closure(G()->account_manager(), &AccountManager::on_update_age_verification_parameters,
+               AgeVerificationParameters(need_age_video_verification, std::move(verify_age_bot_username),
+                                         std::move(verify_age_country), verify_age_min));
 
   Global &options = *G();
 

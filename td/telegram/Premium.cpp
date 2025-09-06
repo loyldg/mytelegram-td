@@ -121,6 +121,9 @@ static td_api::object_ptr<td_api::PremiumFeature> get_premium_feature_object(Sli
   if (premium_feature == "effects") {
     return td_api::make_object<td_api::premiumFeatureMessageEffects>();
   }
+  if (premium_feature == "todo") {
+    return td_api::make_object<td_api::premiumFeatureChecklists>();
+  }
   if (G()->is_test_dc()) {
     LOG(ERROR) << "Receive unsupported premium feature " << premium_feature;
   }
@@ -654,7 +657,7 @@ class GetPremiumGiftPaymentFormQuery final : public Td::ResultHandler {
         auto payment_form = static_cast<const telegram_api::payments_paymentFormStars *>(payment_form_ptr.get());
         if (payment_form->invoice_->prices_.size() != 1u ||
             payment_form->invoice_->prices_[0]->amount_ != star_count_) {
-          return promise_.set_error(400, "Wrong purchase price specified");
+          return promise_.set_error(400, "Wrong Premium subscription price specified");
         }
         td_->create_handler<SendPremiumGiftQuery>(std::move(promise_))
             ->send(std::move(send_input_invoice_), payment_form->form_id_);
@@ -1034,6 +1037,8 @@ static string get_premium_source(const td_api::PremiumFeature *feature) {
       return "business";
     case td_api::premiumFeatureMessageEffects::ID:
       return "effects";
+    case td_api::premiumFeatureChecklists::ID:
+      return "todo";
     default:
       UNREACHABLE();
   }
@@ -1217,13 +1222,13 @@ void get_premium_limit(const td_api::object_ptr<td_api::PremiumLimitType> &limit
 
 void get_premium_features(Td *td, const td_api::object_ptr<td_api::PremiumSource> &source,
                           Promise<td_api::object_ptr<td_api::premiumFeatures>> &&promise) {
-  auto premium_features =
-      full_split(G()->get_option_string(
-                     "premium_features",
-                     "stories,more_upload,double_limits,last_seen,voice_to_text,faster_download,translations,animated_"
-                     "emoji,emoji_status,saved_tags,peer_colors,wallpapers,profile_badge,message_privacy,advanced_chat_"
-                     "management,no_ads,app_icons,infinite_reactions,animated_userpics,premium_stickers,effects"),
-                 ',');
+  auto premium_features = full_split(
+      G()->get_option_string(
+          "premium_features",
+          "stories,more_upload,double_limits,business,last_seen,voice_to_text,faster_download,translations,animated_"
+          "emoji,emoji_status,saved_tags,peer_colors,wallpapers,profile_badge,message_privacy,advanced_chat_management,"
+          "no_ads,app_icons,infinite_reactions,animated_userpics,premium_stickers,effects,todo"),
+      ',');
   vector<td_api::object_ptr<td_api::PremiumFeature>> features;
   for (const auto &premium_feature : premium_features) {
     auto feature = get_premium_feature_object(premium_feature);
