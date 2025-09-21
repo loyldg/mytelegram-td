@@ -3094,6 +3094,10 @@ class CliClient final : public Actor {
                                                                       premium_subscription))));
     } else if (op == "gag") {
       send_request(td_api::make_object<td_api::getAvailableGifts>());
+    } else if (op == "csg") {
+      int64 gift_id;
+      get_args(args, gift_id);
+      send_request(td_api::make_object<td_api::canSendGift>(gift_id));
     } else if (op == "sendg" || op == "sendgp" || op == "sgift") {
       int64 gift_id;
       string owner_id;
@@ -3133,6 +3137,13 @@ class CliClient final : public Actor {
       get_args(args, received_gift_id, keep_original_details, star_count);
       send_request(td_api::make_object<td_api::upgradeGift>(business_connection_id_, received_gift_id,
                                                             keep_original_details, star_count));
+    } else if (op == "bgu") {
+      string owner_id;
+      string upgrade_gift_hash;
+      int64 star_count;
+      get_args(args, owner_id, upgrade_gift_hash, star_count);
+      send_request(
+          td_api::make_object<td_api::buyGiftUpgrade>(as_message_sender(owner_id), upgrade_gift_hash, star_count));
     } else if (op == "tg") {
       string received_gift_id;
       string new_owner_id;
@@ -3153,13 +3164,15 @@ class CliClient final : public Actor {
       bool exclude_unsaved;
       bool exclude_saved;
       bool exclude_unlimited;
-      bool exclude_limited;
+      bool exclude_upgradable;
+      bool exclude_non_upgradable;
       bool exclude_upgraded;
-      get_args(args, owner_id, limit, offset, exclude_unsaved, exclude_saved, exclude_unlimited, exclude_limited,
-               exclude_upgraded);
+      get_args(args, owner_id, limit, offset, exclude_unsaved, exclude_saved, exclude_unlimited, exclude_upgradable,
+               exclude_non_upgradable, exclude_upgraded);
       send_request(td_api::make_object<td_api::getReceivedGifts>(
           business_connection_id_, as_message_sender(owner_id), gift_collection_id_, exclude_unsaved, exclude_saved,
-          exclude_unlimited, exclude_limited, exclude_upgraded, op == "grgsp", offset, limit));
+          exclude_unlimited, exclude_upgradable, exclude_non_upgradable, exclude_upgraded, op == "grgsp", offset,
+          limit));
     } else if (op == "grg") {
       string received_gift_id;
       get_args(args, received_gift_id);
@@ -3168,6 +3181,10 @@ class CliClient final : public Actor {
       string name;
       get_args(args, name);
       send_request(td_api::make_object<td_api::getUpgradedGift>(name));
+    } else if (op == "gugvi") {
+      string name;
+      get_args(args, name);
+      send_request(td_api::make_object<td_api::getUpgradedGiftValueInfo>(name));
     } else if (op == "sgrp") {
       string received_gift_id;
       GiftResalePrice price;
@@ -3834,6 +3851,30 @@ class CliClient final : public Actor {
       string limit;
       get_args(args, user_id, offset, limit);
       send_request(td_api::make_object<td_api::getUserProfilePhotos>(user_id, offset, as_limit(limit)));
+    } else if (op == "gupa") {
+      UserId user_id;
+      int32 offset;
+      string limit;
+      get_args(args, user_id, offset, limit);
+      send_request(td_api::make_object<td_api::getUserProfileAudios>(user_id, offset, as_limit(limit)));
+    } else if (op == "ipa") {
+      string file_id;
+      get_args(args, file_id);
+      send_request(td_api::make_object<td_api::isProfileAudio>(as_file_id(file_id)));
+    } else if (op == "apa") {
+      string file_id;
+      get_args(args, file_id);
+      send_request(td_api::make_object<td_api::addProfileAudio>(as_file_id(file_id)));
+    } else if (op == "spap") {
+      string file_id;
+      string after_file_id;
+      get_args(args, file_id, after_file_id);
+      send_request(
+          td_api::make_object<td_api::setProfileAudioPosition>(as_file_id(file_id), as_file_id(after_file_id)));
+    } else if (op == "rpa") {
+      string file_id;
+      get_args(args, file_id);
+      send_request(td_api::make_object<td_api::removeProfileAudio>(as_file_id(file_id)));
     } else if (op == "dcrm") {
       ChatId chat_id;
       MessageId message_id;
@@ -4231,9 +4272,10 @@ class CliClient final : public Actor {
       string currency;
       int64 amount;
       int64 star_count;
-      get_args(args, currency, amount, star_count);
+      ChatId chat_id;
+      get_args(args, currency, amount, star_count, chat_id);
       send_request(td_api::make_object<td_api::canPurchaseFromStore>(
-          td_api::make_object<td_api::storePaymentPurposeStars>(currency, amount, star_count)));
+          td_api::make_object<td_api::storePaymentPurposeStars>(currency, amount, star_count, chat_id)));
     } else if (op == "cpfsgs") {
       UserId user_id;
       string currency;
@@ -6773,11 +6815,22 @@ class CliClient final : public Actor {
       } else {
         LOG(ERROR) << "Wrong permissions size, expected " << EXPECTED_SIZE;
       }
-    } else if (op == "sctn") {
+    } else if (op == "ggct") {
+      string limit;
+      string offset;
+      get_args(args, limit, offset);
+      send_request(td_api::make_object<td_api::getGiftChatThemes>(offset, as_limit(limit)));
+    } else if (op == "scth") {
       ChatId chat_id;
-      string theme_name;
-      get_args(args, chat_id, theme_name);
-      send_request(td_api::make_object<td_api::setChatTheme>(chat_id, theme_name));
+      string name;
+      get_args(args, chat_id, name);
+      td_api::object_ptr<td_api::InputChatTheme> theme;
+      if (is_alpha(name[0])) {
+        theme = td_api::make_object<td_api::inputChatThemeGift>(name);
+      } else if (!name.empty()) {
+        theme = td_api::make_object<td_api::inputChatThemeEmoji>(name);
+      }
+      send_request(td_api::make_object<td_api::setChatTheme>(chat_id, std::move(theme)));
     } else if (op == "sccd") {
       ChatId chat_id;
       string client_data;
@@ -6996,6 +7049,12 @@ class CliClient final : public Actor {
         send_request(
             td_api::make_object<td_api::setBirthdate>(td_api::make_object<td_api::birthdate>(day, month, year)));
       }
+    } else if (op == "smpt" || op == "smptg") {
+      td_api::object_ptr<td_api::ProfileTab> main_profile_tab = td_api::make_object<td_api::profileTabPosts>();
+      if (op == "smptg") {
+        main_profile_tab = td_api::make_object<td_api::profileTabGifts>();
+      }
+      send_request(td_api::make_object<td_api::setMainProfileTab>(std::move(main_profile_tab)));
     } else if (op == "spec") {
       ChatId chat_id;
       get_args(args, chat_id);
@@ -7130,6 +7189,15 @@ class CliClient final : public Actor {
       string supergroup_id;
       get_args(args, supergroup_id);
       send_request(td_api::make_object<td_api::toggleSupergroupIsBroadcastGroup>(as_supergroup_id(supergroup_id)));
+    } else if (op == "ssmpt" || op == "ssmptg") {
+      string supergroup_id;
+      get_args(args, supergroup_id);
+      td_api::object_ptr<td_api::ProfileTab> main_profile_tab = td_api::make_object<td_api::profileTabPosts>();
+      if (op == "ssmptg") {
+        main_profile_tab = td_api::make_object<td_api::profileTabGifs>();
+      }
+      send_request(td_api::make_object<td_api::setSupergroupMainProfileTab>(as_supergroup_id(supergroup_id),
+                                                                            std::move(main_profile_tab)));
     } else if (op == "tsgsm") {
       string supergroup_id;
       bool sign_messages;
@@ -7871,7 +7939,7 @@ class CliClient final : public Actor {
       send_request(td_api::make_object<td_api::getStarRevenueStatistics>(as_message_sender(owner_id), is_dark));
     } else if (op == "gswu") {
       string owner_id;
-      int32 star_count;
+      int64 star_count;
       string password;
       get_args(args, owner_id, star_count, password);
       send_request(
@@ -7880,6 +7948,14 @@ class CliClient final : public Actor {
       string owner_id;
       get_args(args, owner_id);
       send_request(td_api::make_object<td_api::getStarAdAccountUrl>(as_message_sender(owner_id)));
+    } else if (op == "gtrs") {
+      bool is_dark;
+      get_args(args, is_dark);
+      send_request(td_api::make_object<td_api::getTonRevenueStatistics>(is_dark));
+    } else if (op == "gtwu") {
+      string password;
+      get_args(args, password);
+      send_request(td_api::make_object<td_api::getTonWithdrawalUrl>(password));
     } else {
       op_not_found_count++;
     }
