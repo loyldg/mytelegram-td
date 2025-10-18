@@ -45,6 +45,8 @@ class StarGiftManager final : public Actor {
 
   void on_get_star_gift(const StarGift &star_gift, bool from_server);
 
+  void can_send_gift(int64 gift_id, Promise<td_api::object_ptr<td_api::CanSendGiftResult>> &&promise);
+
   void send_gift(int64 gift_id, DialogId dialog_id, td_api::object_ptr<td_api::formattedText> text, bool is_private,
                  bool pay_for_upgrade, Promise<Unit> &&promise);
 
@@ -61,21 +63,30 @@ class StarGiftManager final : public Actor {
   void upgrade_gift(BusinessConnectionId business_connection_id, StarGiftId star_gift_id, bool keep_original_details,
                     int64 star_count, Promise<td_api::object_ptr<td_api::upgradeGiftResult>> &&promise);
 
+  void buy_gift_upgrade(DialogId dialog_id, const string &prepaid_upgrade_hash, int64 star_count,
+                        Promise<Unit> &&promise);
+
   void transfer_gift(BusinessConnectionId business_connection_id, StarGiftId star_gift_id, DialogId receiver_dialog_id,
                      int64 star_count, Promise<Unit> &&promise);
+
+  void drop_gift_original_details(StarGiftId star_gift_id, int64 star_count, Promise<Unit> &&promise);
 
   void send_resold_gift(const string &gift_name, DialogId receiver_dialog_id, StarGiftResalePrice price,
                         Promise<td_api::object_ptr<td_api::GiftResaleResult>> &&promise);
 
   void get_saved_star_gifts(BusinessConnectionId business_connection_id, DialogId dialog_id,
                             StarGiftCollectionId collection_id, bool exclude_unsaved, bool exclude_saved,
-                            bool exclude_unlimited, bool exclude_limited, bool exclude_unique, bool sort_by_value,
+                            bool exclude_unlimited, bool exclude_upgradable, bool exclude_non_upgradable,
+                            bool exclude_unique, bool peer_color_available, bool exclude_hosted, bool sort_by_value,
                             const string &offset, int32 limit,
                             Promise<td_api::object_ptr<td_api::receivedGifts>> &&promise);
 
   void get_saved_star_gift(StarGiftId star_gift_id, Promise<td_api::object_ptr<td_api::receivedGift>> &&promise);
 
   void get_upgraded_gift(const string &name, Promise<td_api::object_ptr<td_api::upgradedGift>> &&promise);
+
+  void get_upgraded_gift_value_info(const string &name,
+                                    Promise<td_api::object_ptr<td_api::upgradedGiftValueInfo>> &&promise);
 
   void get_star_gift_withdrawal_url(StarGiftId star_gift_id, const string &password, Promise<string> &&promise);
 

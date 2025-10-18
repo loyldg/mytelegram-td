@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
-project(TDLib VERSION 1.8.53 LANGUAGES CXX C)
+project(TDLib VERSION 1.8.56 LANGUAGES CXX C)
 
 if (NOT DEFINED CMAKE_MODULE_PATH)
   set(CMAKE_MODULE_PATH "")
@@ -387,6 +387,7 @@ set(TDLIB_SOURCE_PART1
   td/telegram/ChannelRecommendationManager.cpp
   td/telegram/ChatManager.cpp
   td/telegram/ChatReactions.cpp
+  td/telegram/ChatTheme.cpp
   td/telegram/ClientActor.cpp
   td/telegram/CommonDialogManager.cpp
   td/telegram/ConfigManager.cpp
@@ -553,6 +554,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/PasswordManager.cpp
   td/telegram/Payments.cpp
   td/telegram/PeerColor.cpp
+  td/telegram/PeerColorCollectible.cpp
   td/telegram/PeopleNearbyManager.cpp
   td/telegram/PhoneNumberManager.cpp
   td/telegram/Photo.cpp
@@ -562,6 +564,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/Premium.cpp
   td/telegram/PremiumGiftOption.cpp
   td/telegram/PrivacyManager.cpp
+  td/telegram/ProfileTab.cpp
   td/telegram/PromoDataManager.cpp
   td/telegram/QueryCombiner.cpp
   td/telegram/QueryMerger.cpp
@@ -728,6 +731,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/ChatId.h
   td/telegram/ChatManager.h
   td/telegram/ChatReactions.h
+  td/telegram/ChatTheme.h
   td/telegram/ClientActor.h
   td/telegram/CommonDialogManager.h
   td/telegram/ConfigManager.h
@@ -812,7 +816,9 @@ set(TDLIB_SOURCE_PART2
   td/telegram/FolderId.h
   td/telegram/ForumTopic.h
   td/telegram/ForumTopicEditedData.h
+  td/telegram/ForumTopicFullId.h
   td/telegram/ForumTopicIcon.h
+  td/telegram/ForumTopicId.h
   td/telegram/ForumTopicInfo.h
   td/telegram/ForumTopicManager.h
   td/telegram/Game.h
@@ -933,6 +939,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/PasswordManager.h
   td/telegram/Payments.h
   td/telegram/PeerColor.h
+  td/telegram/PeerColorCollectible.h
   td/telegram/PeopleNearbyManager.h
   td/telegram/PhoneNumberManager.h
   td/telegram/Photo.h
@@ -945,6 +952,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/Premium.h
   td/telegram/PremiumGiftOption.h
   td/telegram/PrivacyManager.h
+  td/telegram/ProfileTab.h
   td/telegram/PromoDataManager.h
   td/telegram/PtsManager.h
   td/telegram/PublicDialogType.h
@@ -1096,6 +1104,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/BusinessRecipients.hpp
   td/telegram/BusinessWorkHours.hpp
   td/telegram/ChatReactions.hpp
+  td/telegram/ChatTheme.hpp
   td/telegram/CurrencyAmount.hpp
   td/telegram/DialogFilter.hpp
   td/telegram/DialogInviteLink.hpp
@@ -1137,6 +1146,7 @@ set(TDLIB_SOURCE_PART2
   td/telegram/NotificationGroupInfo.hpp
   td/telegram/OrderInfo.hpp
   td/telegram/PaidReactionType.hpp
+  td/telegram/PeerColorCollectible.hpp
   td/telegram/Photo.hpp
   td/telegram/PhotoSize.hpp
   td/telegram/PhotoSizeSource.hpp
