@@ -26,9 +26,11 @@ class UserStarGift {
   FormattedText message_;
   StarGiftId star_gift_id_;
   vector<StarGiftCollectionId> collection_ids_;
+  string prepaid_upgrade_hash_;
   int64 convert_star_count_ = 0;
   int64 upgrade_star_count_ = 0;
   int64 transfer_star_count_ = 0;
+  int64 drop_original_details_star_count_ = 0;
   int32 date_ = 0;
   int32 can_transfer_at_ = 0;
   int32 can_resell_at_ = 0;
@@ -39,6 +41,7 @@ class UserStarGift {
   bool can_upgrade_ = false;
   bool can_transfer_ = false;
   bool was_refunded_ = false;
+  bool is_upgrade_separate_ = false;
 
  public:
   UserStarGift(Td *td, telegram_api::object_ptr<telegram_api::savedStarGift> &&gift, DialogId dialog_id);
