@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -2268,6 +2268,8 @@ void Requests::on_request(uint64 id, const td_api::getCurrentState &request) {
 
     td_->group_call_manager_->get_current_state(updates);
 
+    td_->message_query_manager_->get_current_state(updates);
+
     // TODO updateFileGenerationStart generation_id:int64 original_path:string destination_path:string conversion:string = Update;
     // TODO updateCall call:call = Update;
     // TODO updateGroupCall call:groupCall = Update;
@@ -2800,6 +2802,14 @@ void Requests::on_request(uint64 id, td_api::translateMessageText &request) {
   CREATE_REQUEST_PROMISE();
   td_->messages_manager_->translate_message_text({DialogId(request.chat_id_), MessageId(request.message_id_)},
                                                  request.to_language_code_, std::move(promise));
+}
+
+void Requests::on_request(uint64 id, td_api::summarizeMessage &request) {
+  CHECK_IS_USER();
+  CLEAN_INPUT_STRING(request.translate_to_language_code_);
+  CREATE_REQUEST_PROMISE();
+  td_->message_query_manager_->summarize_message_text({DialogId(request.chat_id_), MessageId(request.message_id_)},
+                                                      request.translate_to_language_code_, std::move(promise));
 }
 
 void Requests::on_request(uint64 id, const td_api::recognizeSpeech &request) {
@@ -3593,7 +3603,7 @@ void Requests::on_request(uint64 id, const td_api::clearSearchedForTags &request
 void Requests::on_request(uint64 id, const td_api::deleteAllCallMessages &request) {
   CHECK_IS_USER();
   CREATE_OK_REQUEST_PROMISE();
-  td_->messages_manager_->delete_all_call_messages(request.revoke_, std::move(promise));
+  td_->message_query_manager_->delete_all_call_messages(request.revoke_, std::move(promise));
 }
 
 void Requests::on_request(uint64 id, const td_api::searchChatRecentLocationMessages &request) {
@@ -3898,15 +3908,15 @@ void Requests::on_request(uint64 id, const td_api::deleteChatMessagesBySender &r
   CHECK_IS_USER();
   CREATE_OK_REQUEST_PROMISE();
   TRY_RESULT_PROMISE(promise, sender_dialog_id, get_message_sender_dialog_id(td_, request.sender_id_, false, false));
-  td_->messages_manager_->delete_dialog_messages_by_sender(DialogId(request.chat_id_), sender_dialog_id,
-                                                           std::move(promise));
+  td_->message_query_manager_->delete_dialog_messages_by_sender(DialogId(request.chat_id_), sender_dialog_id,
+                                                                std::move(promise));
 }
 
 void Requests::on_request(uint64 id, const td_api::deleteChatMessagesByDate &request) {
   CHECK_IS_USER();
   CREATE_OK_REQUEST_PROMISE();
-  td_->messages_manager_->delete_dialog_messages_by_date(DialogId(request.chat_id_), request.min_date_,
-                                                         request.max_date_, request.revoke_, std::move(promise));
+  td_->message_query_manager_->delete_dialog_messages_by_date(DialogId(request.chat_id_), request.min_date_,
+                                                              request.max_date_, request.revoke_, std::move(promise));
 }
 
 void Requests::on_request(uint64 id, const td_api::readAllChatMentions &request) {
@@ -6051,6 +6061,12 @@ void Requests::on_request(uint64 id, const td_api::clearAllDraftMessages &reques
   td_->messages_manager_->clear_all_draft_messages(request.exclude_secret_chats_, std::move(promise));
 }
 
+void Requests::on_request(uint64 id, const td_api::getStakeDiceState &request) {
+  CHECK_IS_USER();
+  CREATE_REQUEST_PROMISE();
+  td_->message_query_manager_->get_emoji_game_info(std::move(promise));
+}
+
 void Requests::on_request(uint64 id, const td_api::downloadFile &request) {
   CREATE_REQUEST_PROMISE();
   td_->file_manager_->download_file(FileId(request.file_id_, 0), request.priority_, request.offset_, request.limit_,
@@ -6224,16 +6240,11 @@ void Requests::on_request(uint64 id, td_api::addContact &request) {
 
 void Requests::on_request(uint64 id, td_api::importContacts &request) {
   CHECK_IS_USER();
-  vector<Contact> contacts;
-  contacts.reserve(request.contacts_.size());
-  for (auto &contact : request.contacts_) {
-    auto r_contact = get_contact(td_, std::move(contact));
-    if (r_contact.is_error()) {
-      return send_closure(td_actor_, &Td::send_error, id, r_contact.move_as_error());
-    }
-    contacts.push_back(r_contact.move_as_ok());
+  auto r_contacts = get_contacts(td_, std::move(request.contacts_));
+  if (r_contacts.is_error()) {
+    return send_closure(td_actor_, &Td::send_error, id, r_contacts.move_as_error());
   }
-  CREATE_REQUEST(ImportContactsRequest, std::move(contacts));
+  CREATE_REQUEST(ImportContactsRequest, r_contacts.move_as_ok());
 }
 
 void Requests::on_request(uint64 id, const td_api::getContacts &request) {
@@ -6260,16 +6271,11 @@ void Requests::on_request(uint64 id, const td_api::getImportedContactCount &requ
 
 void Requests::on_request(uint64 id, td_api::changeImportedContacts &request) {
   CHECK_IS_USER();
-  vector<Contact> contacts;
-  contacts.reserve(request.contacts_.size());
-  for (auto &contact : request.contacts_) {
-    auto r_contact = get_contact(td_, std::move(contact));
-    if (r_contact.is_error()) {
-      return send_closure(td_actor_, &Td::send_error, id, r_contact.move_as_error());
-    }
-    contacts.push_back(r_contact.move_as_ok());
+  auto r_contacts = get_contacts(td_, std::move(request.contacts_));
+  if (r_contacts.is_error()) {
+    return send_closure(td_actor_, &Td::send_error, id, r_contacts.move_as_error());
   }
-  CREATE_REQUEST(ChangeImportedContactsRequest, std::move(contacts));
+  CREATE_REQUEST(ChangeImportedContactsRequest, r_contacts.move_as_ok());
 }
 
 void Requests::on_request(uint64 id, const td_api::clearImportedContacts &request) {
@@ -8031,10 +8037,7 @@ void Requests::on_request(uint64 id, const td_api::setPinnedGifts &request) {
   CREATE_OK_REQUEST_PROMISE();
   TRY_RESULT_PROMISE(promise, owner_dialog_id, get_message_sender_dialog_id(td_, request.owner_id_, true, false));
   td_->star_gift_manager_->set_dialog_pinned_gifts(
-      owner_dialog_id,
-      transform(request.received_gift_ids_,
-                [](const string &received_gift_id) { return StarGiftId(received_gift_id); }),
-      std::move(promise));
+      owner_dialog_id, StarGiftId::get_star_gift_ids(request.received_gift_ids_), std::move(promise));
 }
 
 void Requests::on_request(uint64 id, const td_api::toggleChatGiftNotifications &request) {
@@ -8113,7 +8116,7 @@ void Requests::on_request(uint64 id, td_api::sendGiftPurchaseOffer &request) {
 void Requests::on_request(uint64 id, const td_api::processGiftPurchaseOffer &request) {
   CHECK_IS_USER();
   CREATE_OK_REQUEST_PROMISE();
-  td_->star_gift_manager_->process_gift_offer(MessageId(request.message_id_), !request.approve_, std::move(promise));
+  td_->star_gift_manager_->process_gift_offer(MessageId(request.message_id_), !request.accept_, std::move(promise));
 }
 
 void Requests::on_request(uint64 id, td_api::getReceivedGifts &request) {
@@ -8191,10 +8194,7 @@ void Requests::on_request(uint64 id, td_api::createGiftCollection &request) {
   CREATE_REQUEST_PROMISE();
   TRY_RESULT_PROMISE(promise, owner_dialog_id, get_message_sender_dialog_id(td_, request.owner_id_, true, false));
   td_->star_gift_manager_->create_gift_collection(
-      owner_dialog_id, request.name_,
-      transform(request.received_gift_ids_,
-                [](const string &received_gift_id) { return StarGiftId(received_gift_id); }),
-      std::move(promise));
+      owner_dialog_id, request.name_, StarGiftId::get_star_gift_ids(request.received_gift_ids_), std::move(promise));
 }
 
 void Requests::on_request(uint64 id, const td_api::reorderGiftCollections &request) {
@@ -8228,33 +8228,27 @@ void Requests::on_request(uint64 id, const td_api::addGiftCollectionGifts &reque
   CHECK_IS_USER();
   CREATE_REQUEST_PROMISE();
   TRY_RESULT_PROMISE(promise, owner_dialog_id, get_message_sender_dialog_id(td_, request.owner_id_, true, false));
-  td_->star_gift_manager_->add_gift_collection_gifts(
-      owner_dialog_id, StarGiftCollectionId(request.collection_id_),
-      transform(request.received_gift_ids_,
-                [](const string &received_gift_id) { return StarGiftId(received_gift_id); }),
-      std::move(promise));
+  td_->star_gift_manager_->add_gift_collection_gifts(owner_dialog_id, StarGiftCollectionId(request.collection_id_),
+                                                     StarGiftId::get_star_gift_ids(request.received_gift_ids_),
+                                                     std::move(promise));
 }
 
 void Requests::on_request(uint64 id, const td_api::removeGiftCollectionGifts &request) {
   CHECK_IS_USER();
   CREATE_REQUEST_PROMISE();
   TRY_RESULT_PROMISE(promise, owner_dialog_id, get_message_sender_dialog_id(td_, request.owner_id_, true, false));
-  td_->star_gift_manager_->remove_gift_collection_gifts(
-      owner_dialog_id, StarGiftCollectionId(request.collection_id_),
-      transform(request.received_gift_ids_,
-                [](const string &received_gift_id) { return StarGiftId(received_gift_id); }),
-      std::move(promise));
+  td_->star_gift_manager_->remove_gift_collection_gifts(owner_dialog_id, StarGiftCollectionId(request.collection_id_),
+                                                        StarGiftId::get_star_gift_ids(request.received_gift_ids_),
+                                                        std::move(promise));
 }
 
 void Requests::on_request(uint64 id, const td_api::reorderGiftCollectionGifts &request) {
   CHECK_IS_USER();
   CREATE_REQUEST_PROMISE();
   TRY_RESULT_PROMISE(promise, owner_dialog_id, get_message_sender_dialog_id(td_, request.owner_id_, true, false));
-  td_->star_gift_manager_->reorder_gift_collection_gifts(
-      owner_dialog_id, StarGiftCollectionId(request.collection_id_),
-      transform(request.received_gift_ids_,
-                [](const string &received_gift_id) { return StarGiftId(received_gift_id); }),
-      std::move(promise));
+  td_->star_gift_manager_->reorder_gift_collection_gifts(owner_dialog_id, StarGiftCollectionId(request.collection_id_),
+                                                         StarGiftId::get_star_gift_ids(request.received_gift_ids_),
+                                                         std::move(promise));
 }
 
 void Requests::on_request(uint64 id, td_api::createInvoiceLink &request) {

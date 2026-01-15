@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -103,6 +103,7 @@
 #include "td/telegram/ToDoItem.hpp"
 #include "td/telegram/ToDoList.h"
 #include "td/telegram/ToDoList.hpp"
+#include "td/telegram/TonAmount.h"
 #include "td/telegram/TopDialogManager.h"
 #include "td/telegram/TranscriptionManager.h"
 #include "td/telegram/UserId.h"
@@ -130,6 +131,7 @@
 #include "td/utils/MimeType.h"
 #include "td/utils/misc.h"
 #include "td/utils/PathView.h"
+#include "td/utils/Random.h"
 #include "td/utils/Slice.h"
 #include "td/utils/SliceBuilder.h"
 #include "td/utils/tl_helpers.h"
@@ -758,12 +760,24 @@ class MessageDice final : public MessageContent {
  public:
   string emoji;
   int32 dice_value = 0;
+  bool is_stake = false;
+  string seed;
+  string state_hash;
+  int64 stake_ton_count = 0;
+  int64 prize_ton_count = 0;
 
   static constexpr const char *DEFAULT_EMOJI = "🎲";
 
   MessageDice() = default;
-  MessageDice(const string &emoji, int32 dice_value)
-      : emoji(emoji.empty() ? string(DEFAULT_EMOJI) : remove_emoji_modifiers(emoji)), dice_value(dice_value) {
+  MessageDice(const string &emoji, int32 dice_value, bool is_stake, string seed, string state_hash,
+              int64 stake_ton_count, int64 prize_ton_count)
+      : emoji(emoji.empty() ? string(DEFAULT_EMOJI) : remove_emoji_modifiers(emoji))
+      , dice_value(dice_value)
+      , is_stake(is_stake)
+      , seed(std::move(seed))
+      , state_hash(std::move(state_hash))
+      , stake_ton_count(stake_ton_count)
+      , prize_ton_count(prize_ton_count) {
   }
 
   MessageContentType get_type() const final {
@@ -775,9 +789,30 @@ class MessageDice final : public MessageContent {
       return false;
     }
     if (emoji == DEFAULT_EMOJI || emoji == "🎯") {
-      return dice_value <= 6;
+      if (dice_value > 6) {
+        return false;
+      }
+    } else if (dice_value > 1000) {
+      return false;
     }
-    return dice_value <= 1000;
+    if (is_stake) {
+      if (dice_value != 0) {
+        if (emoji != DEFAULT_EMOJI) {
+          return false;
+        }
+        if (seed.empty()) {
+          return false;
+        }
+        if (stake_ton_count <= 0 || prize_ton_count <= 0) {
+          return false;
+        }
+      } else {
+        if (state_hash.empty() || seed.size() != 32u) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 };
 
@@ -1970,8 +2005,31 @@ static void store(const MessageContent *content, StorerT &storer) {
     }
     case MessageContentType::Dice: {
       const auto *m = static_cast<const MessageDice *>(content);
+      bool has_seed = !m->seed.empty();
+      bool has_stake_ton_count = m->stake_ton_count != 0;
+      bool has_prize_ton_count = m->prize_ton_count != 0;
+      bool has_state_hash = !m->state_hash.empty();
+      BEGIN_STORE_FLAGS();
+      STORE_FLAG(m->is_stake);
+      STORE_FLAG(has_seed);
+      STORE_FLAG(has_stake_ton_count);
+      STORE_FLAG(has_prize_ton_count);
+      STORE_FLAG(has_state_hash);
+      END_STORE_FLAGS();
       store(m->emoji, storer);
       store(m->dice_value, storer);
+      if (has_seed) {
+        store(m->seed, storer);
+      }
+      if (has_stake_ton_count) {
+        store(m->stake_ton_count, storer);
+      }
+      if (has_prize_ton_count) {
+        store(m->prize_ton_count, storer);
+      }
+      if (has_state_hash) {
+        store(m->state_hash, storer);
+      }
       break;
     }
     case MessageContentType::ProximityAlertTriggered: {
@@ -3144,6 +3202,19 @@ static void parse(unique_ptr<MessageContent> &content, ParserT &parser) {
     }
     case MessageContentType::Dice: {
       auto m = make_unique<MessageDice>();
+      bool has_seed = false;
+      bool has_stake_ton_count = false;
+      bool has_prize_ton_count = false;
+      bool has_state_hash = false;
+      if (parser.version() >= static_cast<int32>(Version::AddDiceFlags)) {
+        BEGIN_PARSE_FLAGS();
+        PARSE_FLAG(m->is_stake);
+        PARSE_FLAG(has_seed);
+        PARSE_FLAG(has_stake_ton_count);
+        PARSE_FLAG(has_prize_ton_count);
+        PARSE_FLAG(has_state_hash);
+        END_PARSE_FLAGS();
+      }
       if (parser.version() >= static_cast<int32>(Version::AddDiceEmoji)) {
         parse(m->emoji, parser);
         remove_emoji_modifiers_in_place(m->emoji);
@@ -3151,6 +3222,18 @@ static void parse(unique_ptr<MessageContent> &content, ParserT &parser) {
         m->emoji = MessageDice::DEFAULT_EMOJI;
       }
       parse(m->dice_value, parser);
+      if (has_seed) {
+        parse(m->seed, parser);
+      }
+      if (has_stake_ton_count) {
+        parse(m->stake_ton_count, parser);
+      }
+      if (has_prize_ton_count) {
+        parse(m->prize_ton_count, parser);
+      }
+      if (has_state_hash) {
+        parse(m->state_hash, parser);
+      }
       is_bad = !m->is_valid();
       content = std::move(m);
       break;
@@ -4283,7 +4366,7 @@ static Result<InputMessageContent> create_input_message_content(
       if (!clean_input_string(input_dice->emoji_)) {
         return Status::Error(400, "Dice emoji must be encoded in UTF-8");
       }
-      content = td::make_unique<MessageDice>(input_dice->emoji_, 0);
+      content = td::make_unique<MessageDice>(input_dice->emoji_, 0, false, string(), string(), 0, 0);
       clear_draft = input_dice->clear_draft_;
       break;
     }
@@ -4300,7 +4383,7 @@ static Result<InputMessageContent> create_input_message_content(
 
       if (input_paid_media->star_count_ <= 0 ||
           input_paid_media->star_count_ >
-              td->option_manager_->get_option_integer("paid_media_message_star_count_max")) {
+              (is_bot ? 1000000 : td->option_manager_->get_option_integer("paid_media_message_star_count_max"))) {
         return Status::Error(400, "Invalid media price specified");
       }
       vector<MessageExtendedMedia> extended_media;
@@ -4331,6 +4414,21 @@ static Result<InputMessageContent> create_input_message_content(
 
       content =
           make_unique<MessagePhoto>(std::move(photo), std::move(caption), input_photo->has_spoiler_ && !is_secret);
+      break;
+    }
+    case td_api::inputMessageStakeDice::ID: {
+      auto input_dice = static_cast<td_api::inputMessageStakeDice *>(input_message_content.get());
+      if (!clean_input_string(input_dice->state_hash_)) {
+        return Status::Error(400, "State hash must be encoded in UTF-8");
+      }
+      if (input_dice->state_hash_.empty()) {
+        return Status::Error(400, "State hash must be non-empty");
+      }
+      string client_seed(32, '\0');
+      Random::secure_bytes(client_seed);
+      content = td::make_unique<MessageDice>(MessageDice::DEFAULT_EMOJI, 0, true, std::move(client_seed),
+                                             std::move(input_dice->state_hash_), input_dice->stake_toncoin_amount_, -1);
+      clear_draft = input_dice->clear_draft_;
       break;
     }
     case td_api::inputMessageSticker::ID: {
@@ -4958,6 +5056,10 @@ static telegram_api::object_ptr<telegram_api::InputMedia> get_message_content_in
     }
     case MessageContentType::Dice: {
       const auto *m = static_cast<const MessageDice *>(content);
+      if (m->is_stake) {
+        return make_tl_object<telegram_api::inputMediaStakeDice>(m->state_hash, m->stake_ton_count,
+                                                                 BufferSlice(m->seed));
+      }
       return make_tl_object<telegram_api::inputMediaDice>(m->emoji);
     }
     case MessageContentType::Document: {
@@ -7168,8 +7270,11 @@ void compare_message_contents(Td *td, const MessageContent *old_content, const M
     case MessageContentType::Dice: {
       const auto *lhs = static_cast<const MessageDice *>(old_content);
       const auto *rhs = static_cast<const MessageDice *>(new_content);
-      if (lhs->emoji != rhs->emoji || lhs->dice_value != rhs->dice_value) {
+      if (lhs->emoji != rhs->emoji || lhs->dice_value != rhs->dice_value || lhs->is_stake != rhs->is_stake ||
+          lhs->stake_ton_count != rhs->stake_ton_count || lhs->prize_ton_count != rhs->prize_ton_count) {
         need_update = true;
+      } else if (lhs->seed != rhs->seed || lhs->state_hash != rhs->state_hash) {
+        is_content_changed = true;
       }
       break;
     }
@@ -8391,8 +8496,15 @@ unique_ptr<MessageContent> get_message_content(Td *td, FormattedText message,
     }
     case telegram_api::messageMediaDice::ID: {
       auto media = telegram_api::move_object_as<telegram_api::messageMediaDice>(media_ptr);
+      bool is_stake = media->game_outcome_ != nullptr;
+      if (is_stake && media->emoticon_ != MessageDice::DEFAULT_EMOJI) {
+        return make_unique<MessageUnsupported>();
+      }
 
-      auto m = td::make_unique<MessageDice>(media->emoticon_, media->value_);
+      auto m = td::make_unique<MessageDice>(
+          media->emoticon_, media->value_, is_stake, is_stake ? media->game_outcome_->seed_.as_slice().str() : string(),
+          string(), is_stake ? TonAmount::get_ton_count(media->game_outcome_->stake_ton_amount_, false) : 0,
+          is_stake ? TonAmount::get_ton_count(media->game_outcome_->ton_amount_, false) : 0);
       if (!m->is_valid()) {
         break;
       }
@@ -8726,11 +8838,14 @@ unique_ptr<MessageContent> dup_message_content(Td *td, DialogId dialog_id, const
     case MessageContentType::Contact:
       return make_unique<MessageContact>(*static_cast<const MessageContact *>(content));
     case MessageContentType::Dice: {
-      auto result = td::make_unique<MessageDice>(*static_cast<const MessageDice *>(content));
-      if (type != MessageContentDupType::Forward) {
-        result->dice_value = 0;
+      auto old_content = static_cast<const MessageDice *>(content);
+      if (type == MessageContentDupType::Send && old_content->is_stake) {
+        return td::make_unique<MessageDice>(old_content->emoji, 0, true, old_content->seed, old_content->state_hash,
+                                            old_content->stake_ton_count, 0);
       }
-      return std::move(result);
+      return td::make_unique<MessageDice>(old_content->emoji,
+                                          type != MessageContentDupType::Forward ? 0 : old_content->dice_value, false,
+                                          string(), string(), 0, 0);
     }
     case MessageContentType::Document: {
       auto result = make_unique<MessageDocument>(*static_cast<const MessageDocument *>(content));
@@ -9380,7 +9495,7 @@ unique_ptr<MessageContent> get_action_message_content(Td *td, tl_object_ptr<tele
     }
     case telegram_api::messageActionSetChatWallPaper::ID: {
       auto action = telegram_api::move_object_as<telegram_api::messageActionSetChatWallPaper>(action_ptr);
-      BackgroundInfo background_info(td, std::move(action->wallpaper_), true);
+      BackgroundInfo background_info(td, std::move(action->wallpaper_), true, false);
       if (!background_info.is_valid()) {
         break;
       }
@@ -9971,8 +10086,12 @@ td_api::object_ptr<td_api::MessageContent> get_message_content_object(
           m->dice_value == 0 ? nullptr : td->stickers_manager_->get_dice_stickers_object(m->emoji, m->dice_value);
       auto success_animation_frame_number =
           td->stickers_manager_->get_dice_success_animation_frame_number(m->emoji, m->dice_value);
-      return make_tl_object<td_api::messageDice>(std::move(initial_state), std::move(final_state), m->emoji,
-                                                 m->dice_value, success_animation_frame_number);
+      if (m->is_stake) {
+        return td_api::make_object<td_api::messageStakeDice>(std::move(initial_state), std::move(final_state),
+                                                             m->dice_value, m->stake_ton_count, m->prize_ton_count);
+      }
+      return td_api::make_object<td_api::messageDice>(std::move(initial_state), std::move(final_state), m->emoji,
+                                                      m->dice_value, success_animation_frame_number);
     }
     case MessageContentType::ProximityAlertTriggered: {
       const auto *m = static_cast<const MessageProximityAlertTriggered *>(content);
@@ -10408,7 +10527,7 @@ td_api::object_ptr<td_api::MessageContent> get_message_content_object(
     }
     case MessageContentType::StarGiftPurchaseOfferDeclined: {
       const auto *m = static_cast<const MessageStarGiftPurchaseOfferDeclined *>(content);
-      return td_api::make_object<td_api::messageUpgradedGiftPurchaseOfferDeclined>(
+      return td_api::make_object<td_api::messageUpgradedGiftPurchaseOfferRejected>(
           m->star_gift.get_upgraded_gift_object(td), m->price.get_gift_resale_price_object(), m->offer_message_id.get(),
           m->was_expired);
     }

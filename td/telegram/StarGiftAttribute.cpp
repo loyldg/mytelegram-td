@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -72,7 +72,7 @@ StarGiftAttributeBackdrop::StarGiftAttributeBackdrop(
 }
 
 bool StarGiftAttributeBackdrop::is_valid() const {
-  return 0 < rarity_permille_ && rarity_permille_ <= 1000 && is_valid_color(center_color_) &&
+  return 0 <= rarity_permille_ && rarity_permille_ <= 1000 && is_valid_color(center_color_) &&
          is_valid_color(edge_color_) && is_valid_color(pattern_color_) && is_valid_color(text_color_);
 }
 

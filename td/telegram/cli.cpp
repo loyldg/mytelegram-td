@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -4888,6 +4888,12 @@ class CliClient final : public Actor {
       string to_language_code;
       get_args(args, chat_id, message_id, to_language_code);
       send_request(td_api::make_object<td_api::translateMessageText>(chat_id, message_id, to_language_code));
+    } else if (op == "sum") {
+      ChatId chat_id;
+      MessageId message_id;
+      string to_language_code;
+      get_args(args, chat_id, message_id, to_language_code);
+      send_request(td_api::make_object<td_api::summarizeMessage>(chat_id, message_id, to_language_code));
     } else if (op == "rs") {
       ChatId chat_id;
       MessageId message_id;
@@ -5641,6 +5647,8 @@ class CliClient final : public Actor {
                                                                       get_message_self_destruct_type()));
     } else if (op == "cadm") {
       send_request(td_api::make_object<td_api::clearAllDraftMessages>());
+    } else if (op == "gsds") {
+      send_request(td_api::make_object<td_api::getStakeDiceState>());
     } else if (op == "tchpc") {
       ChatId chat_id;
       bool has_protected_content;
@@ -6591,6 +6599,14 @@ class CliClient final : public Actor {
       string emoji;
       get_args(args, chat_id, emoji);
       send_message(chat_id, td_api::make_object<td_api::inputMessageDice>(emoji, op == "sdicecd"));
+    } else if (op == "stake") {
+      ChatId chat_id;
+      string state_hash;
+      int64 stake_toncoin_amount;
+      bool clear_draft;
+      get_args(args, chat_id, state_hash, stake_toncoin_amount, clear_draft);
+      send_message(chat_id,
+                   td_api::make_object<td_api::inputMessageStakeDice>(state_hash, stake_toncoin_amount, clear_draft));
     } else if (op == "sd" || op == "sdf") {
       ChatId chat_id;
       string document;

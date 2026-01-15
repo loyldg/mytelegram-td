@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -2311,6 +2311,7 @@ void MessagesManager::Message::store(StorerT &storer) const {
   bool has_suggested_post = suggested_post != nullptr;
   bool has_flags4 = true;
   bool has_schedule_repeat_period = schedule_repeat_period != 0;
+  bool has_summary_from_language = !summary_from_language.empty();
   BEGIN_STORE_FLAGS();
   STORE_FLAG(is_channel_post);
   STORE_FLAG(is_outgoing);
@@ -2416,6 +2417,7 @@ void MessagesManager::Message::store(StorerT &storer) const {
     STORE_FLAG(is_paid_suggested_post_ton);
     STORE_FLAG(initial_is_topic_message);
     STORE_FLAG(has_schedule_repeat_period);
+    STORE_FLAG(has_summary_from_language);
     END_STORE_FLAGS();
   }
   // update MessageDb::get_message_info when flags5 is added
@@ -2564,6 +2566,9 @@ void MessagesManager::Message::store(StorerT &storer) const {
   if (has_schedule_repeat_period) {
     store(schedule_repeat_period, storer);
   }
+  if (has_summary_from_language) {
+    store(summary_from_language, storer);
+  }
 }
 
 // do not forget to resolve message dependencies
@@ -2630,6 +2635,7 @@ void MessagesManager::Message::parse(ParserT &parser) {
   bool has_suggested_post = false;
   bool has_flags4 = false;
   bool has_schedule_repeat_period = false;
+  bool has_summary_from_language = false;
   BEGIN_PARSE_FLAGS();
   PARSE_FLAG(is_channel_post);
   PARSE_FLAG(is_outgoing);
@@ -2735,6 +2741,7 @@ void MessagesManager::Message::parse(ParserT &parser) {
     PARSE_FLAG(is_paid_suggested_post_ton);
     PARSE_FLAG(initial_is_topic_message);
     PARSE_FLAG(has_schedule_repeat_period);
+    PARSE_FLAG(has_summary_from_language);
     END_PARSE_FLAGS();
   }
 
@@ -2947,6 +2954,9 @@ void MessagesManager::Message::parse(ParserT &parser) {
   }
   if (has_schedule_repeat_period) {
     parse(schedule_repeat_period, parser);
+  }
+  if (has_summary_from_language) {
+    parse(summary_from_language, parser);
   }
 
   CHECK(content != nullptr);
@@ -8348,20 +8358,6 @@ void MessagesManager::delete_dialog_history(DialogId dialog_id, bool remove_from
                                                                revoke, allow_error, 0, std::move(promise));
 }
 
-void MessagesManager::delete_topic_history(DialogId dialog_id, ForumTopicId forum_topic_id, Promise<Unit> &&promise) {
-  TRY_STATUS_PROMISE(
-      promise, td_->dialog_manager_->check_dialog_access(dialog_id, false, AccessRights::Read, "delete_topic_history"));
-
-  // auto old_order = d->order;
-  // delete_all_dialog_topic_messages(d, forum_topic_id);
-
-  td_->message_query_manager_->delete_topic_history_on_server(dialog_id, forum_topic_id, 0, std::move(promise));
-}
-
-void MessagesManager::delete_all_call_messages(bool revoke, Promise<Unit> &&promise) {
-  td_->message_query_manager_->delete_all_call_messages_on_server(revoke, 0, std::move(promise));
-}
-
 vector<MessageId> MessagesManager::find_dialog_messages(const Dialog *d,
                                                         const std::function<bool(const Message *)> &condition) {
   vector<MessageId> message_ids;
@@ -8398,17 +8394,9 @@ vector<MessageId> MessagesManager::find_unloadable_messages(const Dialog *d, int
   return message_ids;
 }
 
-void MessagesManager::delete_dialog_messages_by_sender(DialogId dialog_id, DialogId sender_dialog_id,
-                                                       Promise<Unit> &&promise) {
-  bool is_bot = td_->auth_manager_->is_bot();
-  CHECK(!is_bot);
-
-  TRY_RESULT_PROMISE(promise, d,
-                     check_dialog_access(dialog_id, true, AccessRights::Write, "delete_dialog_messages_by_sender"));
-  TRY_STATUS_PROMISE(promise, td_->dialog_manager_->can_delete_all_dialog_messages_by_sender(dialog_id));
-
-  if (!td_->dialog_manager_->have_input_peer(sender_dialog_id, false, AccessRights::Know)) {
-    return promise.set_error(400, "Message sender not found");
+void MessagesManager::delete_local_dialog_messages_by_sender(DialogId dialog_id, DialogId sender_dialog_id) {
+  if (td_->auth_manager_->is_bot()) {
+    return;
   }
 
   if (G()->use_message_database()) {
@@ -8417,85 +8405,36 @@ void MessagesManager::delete_dialog_messages_by_sender(DialogId dialog_id, Dialo
                                                                            Auto());  // TODO Promise
   }
 
+  auto *d = get_dialog(dialog_id);
+  if (d == nullptr) {
+    return;
+  }
+
   CHECK(dialog_id.get_type() == DialogType::Channel);
   auto channel_id = dialog_id.get_channel_id();
   vector<MessageId> message_ids = find_dialog_messages(
-      d, [sender_dialog_id, channel_status = td_->chat_manager_->get_channel_permissions(channel_id),
-          is_bot](const Message *m) {
-        return sender_dialog_id == get_message_sender(m) &&
-               can_delete_channel_message(false, channel_status, m, is_bot);
+      d,
+      [sender_dialog_id, channel_status = td_->chat_manager_->get_channel_permissions(channel_id)](const Message *m) {
+        return sender_dialog_id == get_message_sender(m) && can_delete_channel_message(false, channel_status, m, false);
       });
 
   delete_dialog_messages(d, message_ids, false, DELETE_MESSAGE_USER_REQUEST_SOURCE);
-
-  td_->message_query_manager_->delete_all_channel_messages_by_sender_on_server(channel_id, sender_dialog_id, 0,
-                                                                               std::move(promise));
 }
 
-Status MessagesManager::fix_delete_message_min_max_dates(int32 &min_date, int32 &max_date) {
-  if (min_date > max_date) {
-    return Status::Error(400, "Wrong date interval specified");
-  }
-
-  const int32 telegram_launch_date = 1376438400;
-  if (max_date < telegram_launch_date) {
-    max_date = 0;
-    min_date = 0;
-    return Status::OK();
-  }
-  if (min_date < telegram_launch_date) {
-    min_date = telegram_launch_date;
-  }
-
-  auto current_date = max(G()->unix_time(), 1635000000);
-  if (min_date >= current_date - 30) {
-    max_date = 0;
-    min_date = 0;
-    return Status::OK();
-  }
-  if (max_date >= current_date - 30) {
-    max_date = current_date - 31;
-  }
-  CHECK(min_date <= max_date);
-  return Status::OK();
-}
-
-void MessagesManager::delete_dialog_messages_by_date(DialogId dialog_id, int32 min_date, int32 max_date, bool revoke,
-                                                     Promise<Unit> &&promise) {
-  CHECK(!td_->auth_manager_->is_bot());
-
-  TRY_RESULT_PROMISE(promise, d,
-                     check_dialog_access(dialog_id, false, AccessRights::Read, "delete_dialog_messages_by_date"));
-  TRY_STATUS_PROMISE(promise, fix_delete_message_min_max_dates(min_date, max_date));
-  if (max_date == 0) {
-    return promise.set_value(Unit());
-  }
-
-  switch (dialog_id.get_type()) {
-    case DialogType::User:
-      break;
-    case DialogType::Chat:
-      if (revoke) {
-        return promise.set_error(400, "Bulk message revocation is unsupported in basic group chats");
-      }
-      break;
-    case DialogType::Channel:
-      return promise.set_error(400, "Bulk message deletion is unsupported in supergroup chats");
-    case DialogType::SecretChat:
-    case DialogType::None:
-    default:
-      UNREACHABLE();
-      break;
+void MessagesManager::delete_local_dialog_messages_by_date(DialogId dialog_id, int32 min_date, int32 max_date) {
+  if (td_->auth_manager_->is_bot()) {
+    return;
   }
 
   // TODO delete in database by dates
 
+  auto *d = get_dialog(dialog_id);
+  if (d == nullptr) {
+    return;
+  }
+
   auto message_ids = d->ordered_messages.find_messages_by_date(min_date, max_date, get_get_message_date(d));
-
   delete_dialog_messages(d, message_ids, false, DELETE_MESSAGE_USER_REQUEST_SOURCE);
-
-  td_->message_query_manager_->delete_dialog_messages_by_date_on_server(dialog_id, min_date, max_date, revoke, 0,
-                                                                        std::move(promise));
 }
 
 int32 MessagesManager::get_unload_dialog_delay() const {
@@ -10970,6 +10909,7 @@ MessagesManager::MessageInfo MessagesManager::parse_telegram_api_message(
       message_info.reply_markup = std::move(message->reply_markup_);
       message_info.restriction_reasons = get_restriction_reasons(std::move(message->restriction_reason_));
       message_info.author_signature = std::move(message->post_author_);
+      message_info.summary_from_language = std::move(message->summary_from_language_);
       message_info.sender_boost_count = message->from_boosts_applied_;
       message_info.paid_message_star_count = StarManager::get_star_count(message->paid_message_stars_);
       if (message->saved_peer_id_ != nullptr) {
@@ -11261,6 +11201,7 @@ std::pair<DialogId, unique_ptr<MessagesManager::Message>> MessagesManager::creat
   message->reply_to_story_full_id = reply_to_story_full_id;
   message->restriction_reasons = std::move(message_info.restriction_reasons);
   message->author_signature = std::move(message_info.author_signature);
+  message->summary_from_language = std::move(message_info.summary_from_language);
   message->sender_boost_count = message_info.sender_boost_count;
   message->paid_message_star_count = message_info.paid_message_star_count;
   message->saved_messages_topic_id = message_info.saved_messages_topic_id;
@@ -19829,50 +19770,6 @@ void MessagesManager::on_set_message_reactions(MessageFullId message_full_id, Re
   promise.set_result(std::move(result));
 }
 
-Result<std::pair<int32, int32>> MessagesManager::get_message_schedule_date(
-    td_api::object_ptr<td_api::MessageSchedulingState> &&scheduling_state, bool allow_repeat_period) {
-  if (scheduling_state == nullptr) {
-    return std::make_pair(0, 0);
-  }
-
-  switch (scheduling_state->get_id()) {
-    case td_api::messageSchedulingStateSendWhenVideoProcessed::ID:
-      return Status::Error(400, "Can't force video processing");
-    case td_api::messageSchedulingStateSendWhenOnline::ID: {
-      auto send_date = SCHEDULE_WHEN_ONLINE_DATE;
-      return std::make_pair(send_date, 0);
-    }
-    case td_api::messageSchedulingStateSendAtDate::ID: {
-      auto send_at_date = td_api::move_object_as<td_api::messageSchedulingStateSendAtDate>(scheduling_state);
-      auto send_date = send_at_date->send_date_;
-      if (send_date <= 0) {
-        return Status::Error(400, "Invalid send date specified");
-      }
-      if (send_date <= G()->unix_time() + 10) {
-        return std::make_pair(0, 0);
-      }
-      if (send_date - G()->unix_time() > 367 * 86400) {
-        return Status::Error(400, "Send date is too far in the future");
-      }
-      auto repeat_period = send_at_date->repeat_period_;
-      if (!allow_repeat_period && repeat_period != 0) {
-        return Status::Error(400, "Repeated scheduled messages aren't supported");
-      }
-      if (repeat_period != 0 && repeat_period != 86400 && repeat_period != 7 * 86400 && repeat_period != 14 * 86400 &&
-          repeat_period != 30 * 86400 && repeat_period != 91 * 86400 && repeat_period != 182 * 86400 &&
-          repeat_period != 365 * 86400) {
-        if (!G()->is_test_dc() || (repeat_period != 60 && repeat_period != 300)) {
-          return Status::Error(400, "Invalid message repeat period specified");
-        }
-      }
-      return std::make_pair(send_date, repeat_period);
-    }
-    default:
-      UNREACHABLE();
-      return std::make_pair(0, 0);
-  }
-}
-
 int64 MessagesManager::get_required_paid_message_star_count(int32 error_code, CSlice error_message) {
   auto allow_payment_required_prefix = CSlice("ALLOW_PAYMENT_REQUIRED_");
   if ((error_code == 400 || error_code == 403) && begins_with(error_message, allow_payment_required_prefix)) {
@@ -19902,17 +19799,6 @@ tl_object_ptr<td_api::MessageSendingState> MessagesManager::get_message_sending_
         max(m->try_resend_at - Time::now(), 0.0));
   }
   return nullptr;
-}
-
-tl_object_ptr<td_api::MessageSchedulingState> MessagesManager::get_message_scheduling_state_object(
-    int32 send_date, int32 repeat_period, bool video_processing_pending) {
-  if (video_processing_pending) {
-    return td_api::make_object<td_api::messageSchedulingStateSendWhenVideoProcessed>(send_date);
-  }
-  if (send_date == SCHEDULE_WHEN_ONLINE_DATE) {
-    return td_api::make_object<td_api::messageSchedulingStateSendWhenOnline>();
-  }
-  return td_api::make_object<td_api::messageSchedulingStateSendAtDate>(send_date, repeat_period);
 }
 
 td_api::object_ptr<td_api::MessageContent> MessagesManager::get_message_message_content_object(DialogId dialog_id,
@@ -19972,7 +19858,7 @@ td_api::object_ptr<td_api::message> MessagesManager::get_dialog_event_log_messag
       std::move(forward_info), std::move(import_info), std::move(interaction_info), Auto(), nullptr, nullptr,
       std::move(reply_to), nullptr, nullptr, 0.0, 0.0, via_bot_user_id, 0, m->sender_boost_count,
       m->paid_message_star_count, m->author_signature, 0, 0, get_restriction_info_object(m->restriction_reasons),
-      std::move(content), std::move(reply_markup));
+      m->summary_from_language, std::move(content), std::move(reply_markup));
 }
 
 td_api::object_ptr<td_api::businessMessage> MessagesManager::get_business_message_object(
@@ -20040,7 +19926,7 @@ td_api::object_ptr<td_api::message> MessagesManager::get_business_message_messag
       m->date, m->edit_date, std::move(forward_info), std::move(import_info), nullptr, Auto(), nullptr, nullptr,
       std::move(reply_to), nullptr, std::move(self_destruct_type), 0.0, 0.0, via_bot_user_id, via_business_bot_user_id,
       m->sender_boost_count, m->paid_message_star_count, string(), m->media_album_id, m->effect_id.get(),
-      get_restriction_info_object(m->restriction_reasons), std::move(content), std::move(reply_markup));
+      get_restriction_info_object(m->restriction_reasons), string(), std::move(content), std::move(reply_markup));
 }
 
 td_api::object_ptr<td_api::message> MessagesManager::get_message_object(Dialog *d, MessageId message_id,
@@ -20090,8 +19976,8 @@ td_api::object_ptr<td_api::message> MessagesManager::get_message_object(DialogId
   double auto_delete_in =
       m->ttl_period == 0 ? 0.0 : clamp(m->date + m->ttl_period - G()->server_time(), 1e-3, m->ttl_period - 1e-3);
   auto sender = get_message_sender_object_const(td_, m->sender_user_id, m->sender_dialog_id, source);
-  auto scheduling_state = is_scheduled ? get_message_scheduling_state_object(m->date, m->schedule_repeat_period,
-                                                                             m->video_processing_pending)
+  auto scheduling_state = is_scheduled ? MessageSendOptions::get_message_scheduling_state_object(
+                                             m->date, m->schedule_repeat_period, m->video_processing_pending)
                                        : nullptr;
   auto forward_info = m->forward_info == nullptr
                           ? nullptr
@@ -20138,7 +20024,8 @@ td_api::object_ptr<td_api::message> MessagesManager::get_message_object(DialogId
       std::move(suggested_post), std::move(reply_to), topic.get_message_topic_object(td_),
       std::move(self_destruct_type), ttl_expires_in, auto_delete_in, via_bot_user_id, via_business_bot_user_id,
       m->sender_boost_count, m->paid_message_star_count, m->author_signature, m->media_album_id, m->effect_id.get(),
-      get_restriction_info_object(m->restriction_reasons), std::move(content), std::move(reply_markup));
+      get_restriction_info_object(m->restriction_reasons), m->summary_from_language, std::move(content),
+      std::move(reply_markup));
 }
 
 td_api::object_ptr<td_api::messages> MessagesManager::get_messages_object(int32 total_count, DialogId dialog_id,
@@ -20444,30 +20331,7 @@ int64 MessagesManager::begin_send_message(DialogId dialog_id, const Message *m) 
 }
 
 Status MessagesManager::can_send_message(DialogId dialog_id) const {
-  if (!td_->dialog_manager_->have_input_peer(dialog_id, true, AccessRights::Write)) {
-    return Status::Error(400, "Have no write access to the chat");
-  }
-
-  if (dialog_id.get_type() == DialogType::Channel) {
-    auto channel_id = dialog_id.get_channel_id();
-    auto channel_type = td_->chat_manager_->get_channel_type(channel_id);
-    auto channel_status = td_->chat_manager_->get_channel_permissions(channel_id);
-
-    switch (channel_type) {
-      case ChannelType::Unknown:
-      case ChannelType::Megagroup:
-        break;
-      case ChannelType::Broadcast: {
-        if (!channel_status.can_post_messages()) {
-          return Status::Error(400, "Need administrator rights in the channel chat");
-        }
-        break;
-      }
-      default:
-        UNREACHABLE();
-    }
-  }
-  return Status::OK();
+  return td_->dialog_manager_->can_send_message_to_dialog(dialog_id);
 }
 
 MessageId MessagesManager::get_persistent_message_id(const Dialog *d, MessageId message_id) const {
@@ -21082,11 +20946,11 @@ Result<td_api::object_ptr<td_api::message>> MessagesManager::send_message(
 
   TRY_STATUS(can_send_message(dialog_id));
   TRY_RESULT(message_reply_markup, get_dialog_reply_markup(dialog_id, std::move(reply_markup)));
-  TRY_RESULT(message_send_options,
-             process_message_send_options(dialog_id, std::move(options), true, true, true, true, 1));
+  TRY_RESULT(message_send_options, MessageSendOptions::get_message_send_options(td_, dialog_id, std::move(options),
+                                                                                true, true, true, true, 1));
   TRY_RESULT(message_content, process_input_message_content(dialog_id, std::move(input_message_content),
                                                             !message_send_options.allow_paid));
-  TRY_STATUS(can_use_message_send_options(message_send_options, message_content));
+  TRY_STATUS(message_send_options.can_use_for(message_content));
 
   // there must be no errors after get_message_to_send call
 
@@ -21188,116 +21052,6 @@ Result<InputMessageContent> MessagesManager::process_input_message_content(
   return std::move(content);
 }
 
-Status MessagesManager::check_paid_message_star_count(int64 &paid_message_star_count, int32 message_count) const {
-  if (paid_message_star_count < 0 || paid_message_star_count > 1000000) {
-    return Status::Error(400, "Invalid price for paid message specified");
-  }
-  CHECK(message_count > 0);
-  if (paid_message_star_count % message_count != 0) {
-    return Status::Error(400, "Invalid price for paid messages specified");
-  }
-  if (paid_message_star_count > 0 && !td_->star_manager_->has_owned_star_count(paid_message_star_count)) {
-    return Status::Error(400, "Have not enough Telegram Stars");
-  }
-  paid_message_star_count /= message_count;
-  return Status::OK();
-}
-
-Result<MessagesManager::MessageSendOptions> MessagesManager::process_message_send_options(
-    DialogId dialog_id, tl_object_ptr<td_api::messageSendOptions> &&options, bool allow_update_stickersets_order,
-    bool allow_effect, bool allow_suggested_post, bool allow_repeat_period, int32 message_count) const {
-  MessageSendOptions result;
-  if (options == nullptr) {
-    return std::move(result);
-  }
-
-  result.disable_notification = options->disable_notification_;
-  result.from_background = options->from_background_;
-  if (allow_update_stickersets_order) {
-    result.update_stickersets_order = options->update_order_of_installed_sticker_sets_;
-  }
-  if (td_->auth_manager_->is_bot()) {
-    result.protect_content = options->protect_content_;
-    result.allow_paid = options->allow_paid_broadcast_;
-  } else {
-    result.paid_message_star_count = options->paid_message_star_count_;
-    TRY_STATUS(check_paid_message_star_count(result.paid_message_star_count, message_count));
-  }
-  result.only_preview = options->only_preview_;
-  TRY_RESULT(schedule_date, get_message_schedule_date(std::move(options->scheduling_state_), allow_repeat_period));
-  result.schedule_date = schedule_date.first;
-  result.schedule_repeat_period = schedule_date.second;
-  result.sending_id = options->sending_id_;
-
-  if (result.schedule_date != 0) {
-    auto dialog_type = dialog_id.get_type();
-    if (dialog_type == DialogType::SecretChat) {
-      return Status::Error(400, "Can't schedule messages in secret chats");
-    }
-    if (td_->auth_manager_->is_bot()) {
-      return Status::Error(400, "Bots can't send scheduled messages");
-    }
-
-    if (result.schedule_date == SCHEDULE_WHEN_ONLINE_DATE) {
-      if (dialog_type != DialogType::User) {
-        return Status::Error(400, "Messages can be scheduled till online only in private chats");
-      }
-      if (dialog_id == td_->dialog_manager_->get_my_dialog_id()) {
-        return Status::Error(400, "Can't scheduled till online messages in chat with self");
-      }
-    }
-    if (result.paid_message_star_count > 0) {
-      return Status::Error(400, "Can't schedule paid messages");
-    }
-    if (td_->dialog_manager_->is_admined_monoforum_channel(dialog_id)) {
-      return Status::Error(400, "Can't schedule messages in channel direct messages chats");
-    }
-  }
-  if (options->effect_id_ != 0) {
-    auto dialog_type = dialog_id.get_type();
-    if (dialog_type != DialogType::User) {
-      return Status::Error(400, "Can't use message effects in the chat");
-    }
-    if (!allow_effect) {
-      return Status::Error(400, "Can't use message effects in the method");
-    }
-    result.effect_id = MessageEffectId(options->effect_id_);
-  }
-  TRY_RESULT(suggested_post, SuggestedPost::get_suggested_post(td_, std::move(options->suggested_post_info_)));
-  if (suggested_post != nullptr) {
-    if (!allow_suggested_post) {
-      return Status::Error(400, "Can't send suggested posts with the method");
-    }
-    if (!td_->dialog_manager_->is_monoforum_channel(dialog_id)) {
-      return Status::Error(400, "Suggested posts can be sent only to channel direct messages");
-    }
-    result.has_suggested_post = true;
-    result.suggested_post = *suggested_post;
-  }
-
-  return std::move(result);
-}
-
-Status MessagesManager::can_use_message_send_options(const MessageSendOptions &options,
-                                                     const unique_ptr<MessageContent> &content,
-                                                     MessageSelfDestructType ttl) {
-  if (options.schedule_date != 0) {
-    if (ttl.is_valid()) {
-      return Status::Error(400, "Can't send scheduled self-destructing messages");
-    }
-    if (content->get_type() == MessageContentType::LiveLocation) {
-      return Status::Error(400, "Can't send scheduled live location messages");
-    }
-  }
-
-  return Status::OK();
-}
-
-Status MessagesManager::can_use_message_send_options(const MessageSendOptions &options,
-                                                     const InputMessageContent &content) {
-  return can_use_message_send_options(options, content.content, content.ttl);
-}
-
 Status MessagesManager::can_use_forum_topic_id(Dialog *d, ForumTopicId forum_topic_id) {
   if (forum_topic_id == ForumTopicId()) {
     return Status::OK();
@@ -21340,14 +21094,15 @@ Result<td_api::object_ptr<td_api::messages>> MessagesManager::send_message_group
   }
 
   TRY_STATUS(can_send_message(dialog_id));
-  TRY_RESULT(message_send_options, process_message_send_options(dialog_id, std::move(options), true, true, false, false,
-                                                                static_cast<int32>(input_message_contents.size())));
+  TRY_RESULT(message_send_options,
+             MessageSendOptions::get_message_send_options(td_, dialog_id, std::move(options), true, true, false, false,
+                                                          static_cast<int32>(input_message_contents.size())));
 
   vector<InputMessageContent> message_contents;
   for (auto &input_message_content : input_message_contents) {
     TRY_RESULT(message_content, process_input_message_content(dialog_id, std::move(input_message_content),
                                                               !message_send_options.allow_paid));
-    TRY_STATUS(can_use_message_send_options(message_send_options, message_content));
+    TRY_STATUS(message_send_options.can_use_for(message_content));
     message_contents.push_back(std::move(message_content));
   }
   TRY_STATUS(check_message_group_message_contents(message_contents));
@@ -22440,8 +22195,8 @@ Result<td_api::object_ptr<td_api::message>> MessagesManager::send_inline_query_r
   }
 
   TRY_STATUS(can_send_message(dialog_id));
-  TRY_RESULT(message_send_options,
-             process_message_send_options(dialog_id, std::move(options), false, false, false, false, 1));
+  TRY_RESULT(message_send_options, MessageSendOptions::get_message_send_options(td_, dialog_id, std::move(options),
+                                                                                false, false, false, false, 1));
   bool to_secret = false;
   switch (dialog_id.get_type()) {
     case DialogType::User:
@@ -22471,7 +22226,7 @@ Result<td_api::object_ptr<td_api::message>> MessagesManager::send_inline_query_r
 
   TRY_RESULT(message_topic, MessageTopic::get_send_message_topic(td_, dialog_id, topic_id));
   auto input_reply_to = create_message_input_reply_to(d, message_topic, std::move(reply_to), false);
-  TRY_STATUS(can_use_message_send_options(message_send_options, content->message_content, MessageSelfDestructType()));
+  TRY_STATUS(message_send_options.can_use_for(content->message_content, MessageSelfDestructType()));
   TRY_STATUS(can_send_message_content(dialog_id, content->message_content.get(), false, true, td_));
 
   auto message_content = dup_message_content(td_, dialog_id, content->message_content.get(),
@@ -23261,7 +23016,8 @@ void MessagesManager::edit_message_reply_markup(MessageFullId message_full_id,
 void MessagesManager::edit_message_scheduling_state(
     MessageFullId message_full_id, td_api::object_ptr<td_api::MessageSchedulingState> &&scheduling_state,
     Promise<Unit> &&promise) {
-  TRY_RESULT_PROMISE(promise, schedule_date, get_message_schedule_date(std::move(scheduling_state), true));
+  TRY_RESULT_PROMISE(promise, schedule_date,
+                     MessageSendOptions::get_message_schedule_date(std::move(scheduling_state), true));
 
   auto dialog_id = message_full_id.get_dialog_id();
   TRY_RESULT_PROMISE(promise, d,
@@ -24060,10 +23816,10 @@ Result<MessagesManager::ForwardedMessages> MessagesManager::get_forwarded_messag
   }
 
   TRY_STATUS(can_send_message(to_dialog_id));
-  TRY_RESULT(message_send_options,
-             process_message_send_options(to_dialog_id, std::move(options), false, message_ids.size() == 1u,
-                                          add_offer || message_ids.size() == 1u, message_ids.size() == 1u,
-                                          static_cast<int32>(message_ids.size())));
+  TRY_RESULT(message_send_options, MessageSendOptions::get_message_send_options(
+                                       td_, to_dialog_id, std::move(options), false, message_ids.size() == 1u,
+                                       add_offer || message_ids.size() == 1u, message_ids.size() == 1u,
+                                       static_cast<int32>(message_ids.size())));
   TRY_RESULT(message_topic, MessageTopic::get_send_message_topic(td_, to_dialog_id, topic_id));
   if (message_topic.is_thread()) {
     return Status::Error(400, "Can't forward messages to a specific message thread");
@@ -24161,8 +23917,7 @@ Result<MessagesManager::ForwardedMessages> MessagesManager::get_forwarded_messag
       continue;
     }
 
-    auto can_use_options_status =
-        can_use_message_send_options(message_send_options, content, MessageSelfDestructType());
+    auto can_use_options_status = message_send_options.can_use_for(content, MessageSelfDestructType());
     if (can_use_options_status.is_error()) {
       LOG(INFO) << "Can't forward " << message_id << ": " << can_send_status.message();
       continue;
@@ -24626,7 +24381,7 @@ Result<vector<MessageId>> MessagesManager::resend_messages(DialogId dialog_id, v
     }
   }
   if (paid_message_count > 0) {
-    TRY_STATUS(check_paid_message_star_count(paid_message_star_count, paid_message_count));
+    TRY_STATUS(MessageSendOptions::check_paid_message_star_count(td_, paid_message_star_count, paid_message_count));
   }
 
   vector<MessageId> result(message_ids.size());
@@ -28199,7 +27954,7 @@ void MessagesManager::on_update_dialog_background(DialogId dialog_id,
     return;
   }
 
-  set_dialog_background(d, BackgroundInfo(td_, std::move(wallpaper), true));
+  set_dialog_background(d, BackgroundInfo(td_, std::move(wallpaper), true, false));
 }
 
 void MessagesManager::set_dialog_background(Dialog *d, BackgroundInfo &&background_info) {
@@ -31512,6 +31267,10 @@ bool MessagesManager::update_message(Dialog *d, Message *old_message, unique_ptr
   }
   if (old_message->paid_message_star_count != new_message->paid_message_star_count) {
     old_message->paid_message_star_count = new_message->paid_message_star_count;
+    need_send_update = true;
+  }
+  if (old_message->summary_from_language != new_message->summary_from_language) {
+    old_message->summary_from_language = std::move(new_message->summary_from_language);
     need_send_update = true;
   }
   if (old_message->forward_info != new_message->forward_info) {

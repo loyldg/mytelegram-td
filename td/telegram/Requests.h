@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -319,6 +319,8 @@ class Requests {
   void on_request(uint64 id, td_api::translateText &request);
 
   void on_request(uint64 id, td_api::translateMessageText &request);
+
+  void on_request(uint64 id, td_api::summarizeMessage &request);
 
   void on_request(uint64 id, const td_api::recognizeSpeech &request);
 
@@ -1151,6 +1153,8 @@ class Requests {
   void on_request(uint64 id, const td_api::getTimeZones &request);
 
   void on_request(uint64 id, const td_api::clearAllDraftMessages &request);
+
+  void on_request(uint64 id, const td_api::getStakeDiceState &request);
 
   void on_request(uint64 id, const td_api::downloadFile &request);
 
