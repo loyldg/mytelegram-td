@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -403,12 +403,18 @@ class ToggleNoForwardsQuery final : public Td::ResultHandler {
   explicit ToggleNoForwardsQuery(Promise<Unit> &&promise) : promise_(std::move(promise)) {
   }
 
-  void send(DialogId dialog_id, bool has_protected_content) {
+  void send(DialogId dialog_id, MessageId request_message_id, bool has_protected_content) {
     dialog_id_ = dialog_id;
     auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id, AccessRights::Read);
     CHECK(input_peer != nullptr);
+    auto request_msg_id = request_message_id.get_server_message_id().get();
+    int32 flags = 0;
+    if (request_msg_id) {
+      flags |= telegram_api::messages_toggleNoForwards::REQUEST_MSG_ID_MASK;
+    }
     send_query(G()->net_query_creator().create(
-        telegram_api::messages_toggleNoForwards(std::move(input_peer), has_protected_content), {{dialog_id_}}));
+        telegram_api::messages_toggleNoForwards(flags, std::move(input_peer), has_protected_content, request_msg_id),
+        {{dialog_id_}}));
   }
 
   void on_result(BufferSlice packet) final {
@@ -1490,6 +1496,33 @@ bool DialogManager::have_input_peer(DialogId dialog_id, bool allow_secret_chats,
   }
 }
 
+Status DialogManager::can_send_message_to_dialog(DialogId dialog_id) const {
+  if (!have_input_peer(dialog_id, true, AccessRights::Write)) {
+    return Status::Error(400, "Have no write access to the chat");
+  }
+
+  if (dialog_id.get_type() == DialogType::Channel) {
+    auto channel_id = dialog_id.get_channel_id();
+    auto channel_type = td_->chat_manager_->get_channel_type(channel_id);
+    auto channel_status = td_->chat_manager_->get_channel_permissions(channel_id);
+
+    switch (channel_type) {
+      case ChannelType::Unknown:
+      case ChannelType::Megagroup:
+        break;
+      case ChannelType::Broadcast: {
+        if (!channel_status.can_post_messages()) {
+          return Status::Error(400, "Need administrator rights in the channel chat");
+        }
+        break;
+      }
+      default:
+        UNREACHABLE();
+    }
+  }
+  return Status::OK();
+}
+
 bool DialogManager::have_dialog_force(DialogId dialog_id, const char *source) const {
   return td_->messages_manager_->have_dialog_force(dialog_id, source);
 }
@@ -1780,8 +1813,7 @@ std::pair<int32, vector<DialogId>> DialogManager::search_recently_found_dialogs(
   }
 
   auto hints_result = hints.search(query, limit, false);
-  return {narrow_cast<int32>(hints_result.first),
-          transform(hints_result.second, [](int64 key) { return DialogId(key); })};
+  return {narrow_cast<int32>(hints_result.first), DialogId::get_dialog_ids(hints_result.second)};
 }
 
 Status DialogManager::add_recently_found_dialog(DialogId dialog_id) {
@@ -2063,6 +2095,40 @@ CustomEmojiId DialogManager::get_dialog_profile_background_custom_emoji_id(Dialo
   }
 }
 
+DialogParticipantStatus DialogManager::get_dialog_status(DialogId dialog_id) const {
+  switch (dialog_id.get_type()) {
+    case DialogType::User:
+      return DialogParticipantStatus::Member(0, string());
+    case DialogType::Chat:
+      return td_->chat_manager_->get_chat_status(dialog_id.get_chat_id());
+    case DialogType::Channel:
+      return td_->chat_manager_->get_channel_status(dialog_id.get_channel_id());
+    case DialogType::SecretChat:
+      return DialogParticipantStatus::Member(0, string());
+    case DialogType::None:
+    default:
+      UNREACHABLE();
+      return DialogParticipantStatus::Member(0, string());
+  }
+}
+
+DialogParticipantStatus DialogManager::get_dialog_permissions(DialogId dialog_id) const {
+  switch (dialog_id.get_type()) {
+    case DialogType::User:
+      return DialogParticipantStatus::Member(0, string());
+    case DialogType::Chat:
+      return td_->chat_manager_->get_chat_permissions(dialog_id.get_chat_id());
+    case DialogType::Channel:
+      return td_->chat_manager_->get_channel_permissions(dialog_id.get_channel_id());
+    case DialogType::SecretChat:
+      return DialogParticipantStatus::Member(0, string());
+    case DialogType::None:
+    default:
+      UNREACHABLE();
+      return DialogParticipantStatus::Member(0, string());
+  }
+}
+
 RestrictedRights DialogManager::get_dialog_default_permissions(DialogId dialog_id) const {
   switch (dialog_id.get_type()) {
     case DialogType::User:
@@ -2077,7 +2143,7 @@ RestrictedRights DialogManager::get_dialog_default_permissions(DialogId dialog_i
     default:
       UNREACHABLE();
       return RestrictedRights(false, false, false, false, false, false, false, false, false, false, false, false, false,
-                              false, false, false, false, ChannelType::Unknown);
+                              false, false, false, false, false, ChannelType::Unknown);
   }
 }
 
@@ -2133,10 +2199,27 @@ string DialogManager::get_dialog_search_text(DialogId dialog_id) const {
   return string();
 }
 
+bool DialogManager::get_dialog_has_protected_content_force(DialogId dialog_id) {
+  switch (dialog_id.get_type()) {
+    case DialogType::User:
+      return td_->user_manager_->get_user_has_protected_content_force(dialog_id.get_user_id());
+    case DialogType::Chat:
+      return td_->chat_manager_->get_chat_has_protected_content(dialog_id.get_chat_id());
+    case DialogType::Channel:
+      return td_->chat_manager_->get_channel_has_protected_content(dialog_id.get_channel_id());
+    case DialogType::SecretChat:
+      return false;
+    case DialogType::None:
+    default:
+      UNREACHABLE();
+      return true;
+  }
+}
+
 bool DialogManager::get_dialog_has_protected_content(DialogId dialog_id) const {
   switch (dialog_id.get_type()) {
     case DialogType::User:
-      return false;
+      return td_->user_manager_->get_user_has_protected_content(dialog_id.get_user_id());
     case DialogType::Chat:
       return td_->chat_manager_->get_chat_has_protected_content(dialog_id.get_chat_id());
     case DialogType::Channel:
@@ -2559,14 +2642,15 @@ void DialogManager::set_dialog_emoji_status(DialogId dialog_id, const unique_ptr
   promise.set_error(400, "Can't change emoji status in the chat");
 }
 
-void DialogManager::toggle_dialog_has_protected_content(DialogId dialog_id, bool has_protected_content,
+void DialogManager::toggle_dialog_has_protected_content(DialogId dialog_id, MessageId request_message_id,
+                                                        bool is_request, bool has_protected_content,
                                                         Promise<Unit> &&promise) {
   TRY_STATUS_PROMISE(promise,
                      check_dialog_access(dialog_id, false, AccessRights::Read, "toggle_dialog_has_protected_content"));
 
   switch (dialog_id.get_type()) {
     case DialogType::User:
-      return promise.set_error(400, "Can't restrict saving content in the chat");
+      break;
     case DialogType::Chat: {
       auto chat_id = dialog_id.get_chat_id();
       auto status = td_->chat_manager_->get_chat_status(chat_id);
@@ -2587,13 +2671,16 @@ void DialogManager::toggle_dialog_has_protected_content(DialogId dialog_id, bool
     default:
       UNREACHABLE();
   }
-
-  // TODO this can be wrong if there were previous toggle_dialog_has_protected_content requests
-  if (get_dialog_has_protected_content(dialog_id) == has_protected_content) {
-    return promise.set_value(Unit());
+  if (is_request) {
+    if (!request_message_id.is_server()) {
+      return promise.set_error(400, "Invalid message identifier specified");
+    }
+  } else {
+    CHECK(request_message_id == MessageId());
   }
 
-  td_->create_handler<ToggleNoForwardsQuery>(std::move(promise))->send(dialog_id, has_protected_content);
+  td_->create_handler<ToggleNoForwardsQuery>(std::move(promise))
+      ->send(dialog_id, request_message_id, has_protected_content);
 }
 
 void DialogManager::set_dialog_description(DialogId dialog_id, const string &description, Promise<Unit> &&promise) {

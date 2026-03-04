@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -695,7 +695,7 @@ class ReorderStickerSetsQuery final : public Td::ResultHandler {
     sticker_type_ = sticker_type;
     send_query(G()->net_query_creator().create(telegram_api::messages_reorderStickerSets(
         0, sticker_type == StickerType::Mask, sticker_type == StickerType::CustomEmoji,
-        StickersManager::convert_sticker_set_ids(sticker_set_ids))));
+        StickerSetId::get_input_sticker_set_ids(sticker_set_ids))));
   }
 
   void on_result(BufferSlice packet) final {
@@ -948,7 +948,7 @@ class ReadFeaturedStickerSetsQuery final : public Td::ResultHandler {
  public:
   void send(const vector<StickerSetId> &sticker_set_ids) {
     send_query(G()->net_query_creator().create(
-        telegram_api::messages_readFeaturedStickers(StickersManager::convert_sticker_set_ids(sticker_set_ids))));
+        telegram_api::messages_readFeaturedStickers(StickerSetId::get_input_sticker_set_ids(sticker_set_ids))));
   }
 
   void on_result(BufferSlice packet) final {
@@ -3643,7 +3643,7 @@ StickerSetId StickersManager::on_get_sticker_set(tl_object_ptr<telegram_api::sti
       s->need_save_to_database_ = true;
     }
     if (s->title_ != set->title_) {
-      LOG(INFO) << "Title of " << set_id << " has changed";
+      LOG(INFO) << "Name of " << set_id << " has changed";
       s->title_ = std::move(set->title_);
       s->is_changed_ = true;
 
@@ -5042,7 +5042,7 @@ std::pair<int32, vector<StickerSetId>> StickersManager::search_installed_sticker
 
   std::pair<size_t, vector<int64>> result = installed_sticker_sets_hints_[type].search(query, limit);
   promise.set_value(Unit());
-  return {narrow_cast<int32>(result.first), convert_sticker_set_ids(result.second)};
+  return {narrow_cast<int32>(result.first), StickerSetId::get_sticker_set_ids(result.second)};
 }
 
 vector<StickerSetId> StickersManager::search_sticker_sets(StickerType sticker_type, const string &query,
@@ -5332,7 +5332,7 @@ void StickersManager::on_load_installed_sticker_sets_finished(StickerType sticke
     reload_installed_sticker_sets(sticker_type, true);
   } else if (!old_installed_sticker_set_ids.empty() &&
              old_installed_sticker_set_ids != installed_sticker_set_ids_[type]) {
-    LOG(ERROR) << "Reload installed " << sticker_type << " sticker sets, because they has changed from "
+    LOG(ERROR) << "Reload installed " << sticker_type << " sticker sets, because they have changed from "
                << old_installed_sticker_set_ids << " to " << installed_sticker_set_ids_[type] << " after loading from "
                << (from_database ? "database" : "server");
     reload_installed_sticker_sets(sticker_type, true);
@@ -8866,19 +8866,11 @@ int64 StickersManager::get_featured_sticker_sets_hash(StickerType sticker_type) 
   return get_vector_hash(numbers);
 }
 
-vector<int64> StickersManager::convert_sticker_set_ids(const vector<StickerSetId> &sticker_set_ids) {
-  return transform(sticker_set_ids, [](StickerSetId sticker_set_id) { return sticker_set_id.get(); });
-}
-
-vector<StickerSetId> StickersManager::convert_sticker_set_ids(const vector<int64> &sticker_set_ids) {
-  return transform(sticker_set_ids, [](int64 sticker_set_id) { return StickerSetId(sticker_set_id); });
-}
-
 td_api::object_ptr<td_api::updateInstalledStickerSets> StickersManager::get_update_installed_sticker_sets_object(
     StickerType sticker_type) const {
   auto type = static_cast<int32>(sticker_type);
   return td_api::make_object<td_api::updateInstalledStickerSets>(
-      get_sticker_type_object(sticker_type), convert_sticker_set_ids(installed_sticker_set_ids_[type]));
+      get_sticker_type_object(sticker_type), StickerSetId::get_input_sticker_set_ids(installed_sticker_set_ids_[type]));
 }
 
 void StickersManager::send_update_installed_sticker_sets(bool from_database) {

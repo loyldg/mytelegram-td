@@ -1,5 +1,5 @@
 //
-// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2025
+// Copyright Aliaksei Levin (levlam@telegram.org), Arseny Smirnov (arseny30@gmail.com) 2014-2026
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -2927,10 +2927,10 @@ void NotificationManager::add_push_notification_user(
   auto user_name = sender_user_id.get() == 136817688 ? "Channel" : sender_name;
   auto user = telegram_api::make_object<telegram_api::user>(
       flags, false, false, false, false, false, false, false, false, false, true /*min*/, false, false, false, false,
-      false, false, false, false, 0, false, false, false, false, false, false, false, false, sender_user_id.get(),
-      sender_access_hash, user_name, string(), string(), string(), std::move(sender_photo), nullptr, 0, Auto(),
-      string(), string(), nullptr, vector<telegram_api::object_ptr<telegram_api::username>>(), nullptr, nullptr,
-      nullptr, 0, 0, 0);
+      false, false, false, false, 0, false, false, false, false, false, false, false, false, false,
+      sender_user_id.get(), sender_access_hash, user_name, string(), string(), string(), std::move(sender_photo),
+      nullptr, 0, Auto(), string(), string(), nullptr, vector<telegram_api::object_ptr<telegram_api::username>>(),
+      nullptr, nullptr, nullptr, 0, 0, 0);
   td_->user_manager_->on_get_user(std::move(user), "add_push_notification_user");
 }
 
@@ -3122,6 +3122,16 @@ Status NotificationManager::process_push_notification_payload(string payload, bo
   }
   if (!announcement_message_text.empty()) {
     LOG(ERROR) << "Have non-empty announcement message text with loc_key = " << loc_key;
+  }
+
+  if (loc_key == "OAUTH_REQUEST") {
+    TRY_RESULT(data_url, custom.get_required_string_field("data_url"));
+    if (data_url.empty() || loc_args.size() < 2) {
+      return Status::Error(200, "Receive invalid OAuth push notification");
+    }
+    send_closure(G()->td(), &Td::send_update,
+                 td_api::make_object<td_api::updateNewOauthRequest>(loc_args[0], loc_args[1], data_url));
+    return Status::OK();
   }
 
   if (loc_key == "DC_UPDATE") {
