@@ -1192,7 +1192,7 @@ class SendMessageQuery final : public Td::ResultHandler {
       return on_error(Status::Error(400, "Have no write access to the chat"));
     }
 
-    auto reply_to = input_reply_to.get_input_reply_to(td_, message_topic, dialog_id, flags);
+    auto reply_to = input_reply_to.get_input_reply_to(td_, message_topic, false, dialog_id, flags);
 
     if (reply_to != nullptr) {
       flags |= telegram_api::messages_sendMessage::REPLY_TO_MASK;
@@ -1341,7 +1341,7 @@ class SendInlineBotResultQuery final : public Td::ResultHandler {
     auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id, AccessRights::Write);
     CHECK(input_peer != nullptr);
 
-    auto reply_to = input_reply_to.get_input_reply_to(td_, message_topic);
+    auto reply_to = input_reply_to.get_input_reply_to(td_, message_topic, false, dialog_id, flags);
 
     if (reply_to != nullptr) {
       flags |= telegram_api::messages_sendInlineBotResult::REPLY_TO_MASK;
@@ -1413,7 +1413,7 @@ class SendMultiMediaQuery final : public Td::ResultHandler {
       return on_error(Status::Error(400, "Have no write access to the chat"));
     }
 
-    auto reply_to = input_reply_to.get_input_reply_to(td_, message_topic);
+    auto reply_to = input_reply_to.get_input_reply_to(td_, message_topic, false, dialog_id, flags);
 
     if (reply_to != nullptr) {
       flags |= telegram_api::messages_sendMultiMedia::REPLY_TO_MASK;
@@ -1555,7 +1555,7 @@ class SendMediaQuery final : public Td::ResultHandler {
       return on_error(Status::Error(400, "Have no write access to the chat"));
     }
 
-    auto reply_to = input_reply_to.get_input_reply_to(td_, message_topic);
+    auto reply_to = input_reply_to.get_input_reply_to(td_, message_topic, false, dialog_id, flags);
 
     if (reply_to != nullptr) {
       flags |= telegram_api::messages_sendMedia::REPLY_TO_MASK;
@@ -1938,7 +1938,7 @@ class ForwardMessagesQuery final : public Td::ResultHandler {
       return on_error(Status::Error(400, "Can't access the chat to forward messages from"));
     }
 
-    auto input_reply_to = message_input_reply_to.get_input_reply_to(td_, message_topic);
+    auto input_reply_to = message_input_reply_to.get_input_reply_to(td_, message_topic, false, to_dialog_id, flags);
     if (input_reply_to != nullptr) {
       flags |= telegram_api::messages_forwardMessages::REPLY_TO_MASK;
     }
@@ -20402,6 +20402,7 @@ MessageInputReplyTo MessagesManager::create_message_input_reply_to(
       !have_message_force(d, implicit_reply_to_message_id, "create_message_input_reply_to 1")) {
     LOG(INFO) << "Have implicit reply to unknown " << implicit_reply_to_message_id;
   }
+  CHECK(implicit_reply_to_message_id == MessageId() || implicit_reply_to_message_id.is_server());
   if (reply_to == nullptr) {
     if (!for_draft && implicit_reply_to_message_id.is_valid()) {
       return MessageInputReplyTo{implicit_reply_to_message_id, DialogId(), MessageQuote(), 0};
@@ -20626,6 +20627,7 @@ void MessagesManager::cancel_send_message_query(DialogId dialog_id, Message *m) 
 
         auto implicit_reply_to_message_id =
             get_message_topic(reply_d->dialog_id, replied_m).get_implicit_reply_to_message_id(td_);
+        CHECK(implicit_reply_to_message_id == MessageId() || implicit_reply_to_message_id.is_server());
         set_message_reply(reply_d, replied_m,
                           MessageInputReplyTo{implicit_reply_to_message_id, DialogId(), MessageQuote(), 0}, true);
       }
@@ -28942,7 +28944,7 @@ void MessagesManager::on_send_dialog_action_timeout(DialogId dialog_id) {
 
   auto file_upload_id = get_message_send_file_upload_id(dialog_id, m, 0);
   if (!file_upload_id.is_valid()) {
-    if (get_message_content_cover(m->content.get()) == nullptr) {
+    if (!has_message_content_cover(m->content.get())) {
       LOG(ERROR) << "Have no being uploaded file in " << to_string(get_message_message_content_object(dialog_id, m));
     }
     return;
@@ -34886,10 +34888,11 @@ void MessagesManager::restore_message_reply_to_message_id(Dialog *d, Message *m)
       << replied_message_full_id << ' ' << m->replied_message_info << ' ' << *input_reply_to;
 
   auto message_id = get_message_id_by_random_id(d, m->reply_to_random_id, "restore_message_reply_to_message_id");
-  if (message_id.is_valid() || message_id.is_valid_scheduled()) {
+  if ((message_id.is_valid() || message_id.is_valid_scheduled()) && !message_id.is_local()) {
     update_message_reply_to_message_id(d, m, message_id, false);
   } else {
     auto implicit_reply_to_message_id = get_message_topic(d->dialog_id, m).get_implicit_reply_to_message_id(td_);
+    CHECK(implicit_reply_to_message_id == MessageId() || implicit_reply_to_message_id.is_server());
     set_message_reply(d, m, MessageInputReplyTo{implicit_reply_to_message_id, DialogId(), MessageQuote(), 0}, false);
   }
 }

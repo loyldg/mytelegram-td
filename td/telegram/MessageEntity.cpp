@@ -1775,6 +1775,25 @@ static void fix_entity_offsets(Slice text, vector<MessageEntity> &entities) {
   }
 }
 
+bool is_found_entity_type(MessageEntity::Type type, bool skip_bot_commands, bool skip_media_timestamps) {
+  switch (type) {
+    case MessageEntity::Type::Mention:
+    case MessageEntity::Type::Hashtag:
+    case MessageEntity::Type::Cashtag:
+    case MessageEntity::Type::PhoneNumber:
+    case MessageEntity::Type::BankCardNumber:
+    case MessageEntity::Type::Url:
+    case MessageEntity::Type::EmailAddress:
+      return true;
+    case MessageEntity::Type::BotCommand:
+      return !skip_bot_commands;
+    case MessageEntity::Type::MediaTimestamp:
+      return !skip_media_timestamps;
+    default:
+      return false;
+  }
+}
+
 vector<MessageEntity> find_entities(Slice text, bool skip_bot_commands, bool skip_media_timestamps) {
   vector<MessageEntity> entities;
 
@@ -4941,9 +4960,23 @@ vector<tl_object_ptr<telegram_api::MessageEntity>> get_input_message_entities(co
   return {};
 }
 
+bool is_allowed_quote_entity_type(MessageEntity::Type type) {
+  switch (type) {
+    case MessageEntity::Type::Bold:
+    case MessageEntity::Type::Italic:
+    case MessageEntity::Type::Underline:
+    case MessageEntity::Type::Strikethrough:
+    case MessageEntity::Type::Spoiler:
+    case MessageEntity::Type::CustomEmoji:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool keep_only_custom_emoji(FormattedText &text) {
   return td::remove_if(text.entities,
-                       [&](const MessageEntity &entity) { return entity.type != MessageEntity::Type::CustomEmoji; });
+                       [](const MessageEntity &entity) { return entity.type != MessageEntity::Type::CustomEmoji; });
 }
 
 void remove_premium_custom_emoji_entities(const Td *td, vector<MessageEntity> &entities, bool remove_unknown) {
