@@ -57,6 +57,7 @@
 #include "td/telegram/NotificationId.h"
 #include "td/telegram/NotificationSettingsScope.h"
 #include "td/telegram/OrderedMessage.h"
+#include "td/telegram/PollId.h"
 #include "td/telegram/QuickReplyShortcutId.h"
 #include "td/telegram/ReactionType.h"
 #include "td/telegram/ReactionUnavailabilityReason.h"
@@ -122,6 +123,7 @@ class MessageContent;
 class MessageForwardInfo;
 struct MessageReactions;
 class MissingInvitees;
+class RequestedDialogType;
 class SuggestedPost;
 class Td;
 class Usernames;
@@ -477,9 +479,7 @@ class MessagesManager final : public Actor {
 
   void set_dialog_message_ttl(DialogId dialog_id, int32 ttl, Promise<Unit> &&promise);
 
-  void share_dialogs_with_bot(const td_api::object_ptr<td_api::KeyboardButtonSource> &source_ptr, int32 button_id,
-                              vector<DialogId> shared_dialog_ids, bool expect_user, bool only_check,
-                              Promise<Unit> &&promise);
+  Result<const RequestedDialogType *> get_message_requested_dialog_type(MessageFullId message_full_id, int32 button_id);
 
   void process_suggested_post(MessageFullId message_full_id, bool is_rejected, int32 schedule_date,
                               const string &comment, Promise<Unit> &&promise);
@@ -967,19 +967,6 @@ class MessagesManager final : public Actor {
 
   void on_binlog_events(vector<BinlogEvent> &&events);
 
-  void add_poll_option(MessageFullId message_full_id, td_api::object_ptr<td_api::inputPollOption> &&option,
-                       Promise<Unit> &&promise);
-
-  void delete_poll_option(MessageFullId message_full_id, const string &option_id, Promise<Unit> &&promise);
-
-  void set_poll_answer(MessageFullId message_full_id, vector<int32> &&option_ids, Promise<Unit> &&promise);
-
-  void get_poll_voters(MessageFullId message_full_id, int32 option_id, int32 offset, int32 limit,
-                       Promise<td_api::object_ptr<td_api::pollVoters>> &&promise);
-
-  void stop_poll(MessageFullId message_full_id, td_api::object_ptr<td_api::ReplyMarkup> &&reply_markup,
-                 Promise<Unit> &&promise);
-
   int64 get_message_random_id(MessageFullId message_full_id);
 
   bool need_poll_group_call_message(MessageFullId message_full_id);
@@ -996,6 +983,10 @@ class MessagesManager final : public Actor {
     int64 star_count_ = 0;
   };
   Result<InvoiceMessageInfo> get_invoice_message_info(MessageFullId message_full_id);
+
+  bool has_message_sender_user_id(MessageFullId message_full_id) const;
+
+  Result<PollId> get_message_poll_id(MessageFullId message_full_id, bool to_stop);
 
   Result<ServerMessageId> get_group_call_message_id(MessageFullId message_full_id);
 
@@ -1933,7 +1924,7 @@ class MessagesManager final : public Actor {
   void set_message_reply(const Dialog *d, Message *m, MessageInputReplyTo input_reply_to, bool is_message_in_dialog);
 
   void update_message_reply_to_message_id(const Dialog *d, Message *m, MessageId reply_to_message_id,
-                                          bool is_message_in_dialog);
+                                          bool is_message_in_dialog, const char *source);
 
   void restore_message_reply_to_message_id(Dialog *d, Message *m);
 
@@ -3143,6 +3134,8 @@ class MessagesManager final : public Actor {
   void suffix_load_till_message_id(Dialog *d, MessageId message_id, Promise<Unit> &&promise);
 
   bool is_deleted_secret_chat(const Dialog *d) const;
+
+  static bool is_message_forward(const Message *m);
 
   static int32 get_message_schedule_date(const Message *m);
 
