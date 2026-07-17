@@ -89,6 +89,10 @@ static bool is_valid_game_name(Slice name) {
   return name.size() >= 3 && is_valid_username(name);
 }
 
+static bool is_valid_text_composition_style_name(CSlice name) {
+  return name.size() >= 8u && is_base64url_characters(name);
+}
+
 static bool is_valid_theme_name(CSlice name) {
   return !name.empty() && check_utf8(name);
 }
@@ -449,7 +453,7 @@ static AdministratorRights get_administrator_rights(Slice rights, bool for_chann
   return AdministratorRights(is_anonymous, can_manage_dialog, can_change_info, can_post_messages, can_edit_messages,
                              can_delete_messages, can_invite_users, can_restrict_members, can_pin_messages,
                              can_manage_topics, can_promote_members, can_manage_calls, can_post_stories,
-                             can_edit_stories, can_delete_stories, can_manage_direct_messages, can_manage_ranks,
+                             can_edit_stories, can_delete_stories, can_manage_direct_messages, can_manage_ranks, false,
                              for_channel ? ChannelType::Broadcast : ChannelType::Megagroup);
 }
 
@@ -1117,6 +1121,12 @@ class LinkManager::InternalLinkRequestManagedBot final : public InternalLink {
   string bot_name_;
 
   td_api::object_ptr<td_api::InternalLinkType> get_internal_link_type_object() const final {
+    auto size = bot_username_.size();
+    if (size < 3u || to_lower(bot_username_[size - 3]) != 'b' || to_lower(bot_username_[size - 2]) != 'o' ||
+        to_lower(bot_username_[size - 1]) != 't') {
+      return td_api::make_object<td_api::internalLinkTypeRequestManagedBot>(
+          manager_bot_username_, PSTRING() << bot_username_ << "bot", bot_name_);
+    }
     return td_api::make_object<td_api::internalLinkTypeRequestManagedBot>(manager_bot_username_, bot_username_,
                                                                           bot_name_);
   }
@@ -1305,8 +1315,8 @@ class LinkManager::InternalLinkSettings final : public InternalLink {
       if (path_[0] == "themes") {
         return td_api::make_object<td_api::settingsSectionAppearance>();
       }
-      if (path_[0] == "ton") {
-        return td_api::make_object<td_api::settingsSectionMyToncoins>();
+      if (path_[0] == "grams" || path_[0] == "ton") {
+        return td_api::make_object<td_api::settingsSectionMyGrams>();
       }
       return nullptr;
     }();
@@ -1371,6 +1381,18 @@ class LinkManager::InternalLinkStoryAlbum final : public InternalLink {
  public:
   InternalLinkStoryAlbum(string story_album_owner_username, StoryAlbumId story_album_id)
       : story_album_owner_username_(std::move(story_album_owner_username)), story_album_id_(story_album_id) {
+  }
+};
+
+class LinkManager::InternalLinkTextCompositionStyle final : public InternalLink {
+  string style_name_;
+
+  td_api::object_ptr<td_api::InternalLinkType> get_internal_link_type_object() const final {
+    return td_api::make_object<td_api::internalLinkTypeTextCompositionStyle>(style_name_);
+  }
+
+ public:
+  explicit InternalLinkTextCompositionStyle(string &&style_name) : style_name_(std::move(style_name)) {
   }
 };
 
@@ -1652,11 +1674,10 @@ class RequestUrlAuthQuery final : public Td::ResultHandler {
     switch (result->get_id()) {
       case telegram_api::urlAuthResultRequest::ID: {
         auto request = telegram_api::move_object_as<telegram_api::urlAuthResultRequest>(result);
-        UserId bot_user_id = UserManager::get_user_id(request->bot_);
+        auto bot_user_id = td_->user_manager_->on_get_user(std::move(request->bot_), "RequestUrlAuthQuery");
         if (!bot_user_id.is_valid()) {
           return on_error(Status::Error(500, "Receive invalid bot_user_id"));
         }
-        td_->user_manager_->on_get_user(std::move(request->bot_), "RequestUrlAuthQuery");
         if (request->request_phone_number_ || !request->browser_.empty() || !request->platform_.empty() ||
             !request->ip_.empty() || !request->region_.empty() || !request->match_codes_.empty()) {
           LOG(ERROR) << "Receive invalid login URL details: " << to_string(request);
@@ -1721,11 +1742,10 @@ class RequestUrlOauthQuery final : public Td::ResultHandler {
     switch (result->get_id()) {
       case telegram_api::urlAuthResultRequest::ID: {
         auto request = telegram_api::move_object_as<telegram_api::urlAuthResultRequest>(result);
-        UserId bot_user_id = UserManager::get_user_id(request->bot_);
+        auto bot_user_id = td_->user_manager_->on_get_user(std::move(request->bot_), "RequestUrlAuthQuery");
         if (!bot_user_id.is_valid()) {
           return on_error(Status::Error(500, "Receive invalid bot_user_id"));
         }
-        td_->user_manager_->on_get_user(std::move(request->bot_), "RequestUrlAuthQuery");
         auto user_id = UserId(request->user_id_hint_);
         if (user_id != UserId() && !user_id.is_valid()) {
           LOG(ERROR) << "Receive " << to_string(request);
@@ -2011,9 +2031,9 @@ LinkManager::LinkInfo LinkManager::get_link_info(Slice link) {
     if (ends_with(host, ".t.me") && host.size() >= 9 && host.find('.') == host.size() - 5) {
       Slice subdomain(&host[0], host.size() - 5);
       static const FlatHashSet<Slice, SliceHash> disallowed_subdomains(
-          {"addemoji",     "addlist",     "addstickers", "addtheme", "auction",  "auth",  "boost", "call",
-           "confirmphone", "contact",     "giftcode",    "invoice",  "joinchat", "login", "m",     "nft",
-           "proxy",        "setlanguage", "share",       "socks",    "web",      "a",     "k",     "z"});
+          {"addemoji",     "addlist", "addstickers", "addstyle", "addtheme", "auction", "auth", "boost", "call",
+           "confirmphone", "contact", "giftcode",    "invoice",  "joinchat", "login",   "m",    "nft",   "proxy",
+           "setlanguage",  "share",   "socks",       "web",      "a",        "k",       "z"});
       if (is_valid_username(subdomain) && disallowed_subdomains.count(subdomain) == 0) {
         result.type_ = LinkType::TMe;
         result.query_ = PSTRING() << '/' << subdomain << http_url.query_;
@@ -2386,9 +2406,9 @@ unique_ptr<LinkManager::InternalLink> LinkManager::parse_tg_link_query(Slice que
   } else if (!path.empty() && path[0] == "stars") {
     // stars
     return td::make_unique<InternalLinkSettings>(vector<string>{"stars"});
-  } else if (!path.empty() && path[0] == "ton") {
-    // ton
-    return td::make_unique<InternalLinkSettings>(vector<string>{"ton"});
+  } else if (!path.empty() && (path[0] == "ton" || path[0] == "grams")) {
+    // grams
+    return td::make_unique<InternalLinkSettings>(vector<string>{"grams"});
   } else if (path.size() == 1 && path[0] == "addlist") {
     auto slug = get_url_query_slug(true, url_query, "addlist");
     if (!slug.empty() && is_base64url_characters(slug)) {
@@ -2419,6 +2439,12 @@ unique_ptr<LinkManager::InternalLink> LinkManager::parse_tg_link_query(Slice que
     auto language_pack_id = get_arg("lang");
     if (is_valid_language_pack_id(language_pack_id)) {
       return td::make_unique<InternalLinkLanguage>(std::move(language_pack_id));
+    }
+  } else if (path.size() == 1 && path[0] == "addstyle") {
+    // addstyle?slug=<name>
+    auto style_name = get_arg("slug");
+    if (is_valid_text_composition_style_name(style_name)) {
+      return td::make_unique<InternalLinkTextCompositionStyle>(std::move(style_name));
     }
   } else if (path.size() == 1 && path[0] == "addtheme") {
     // addtheme?slug=<name>
@@ -2530,7 +2556,7 @@ unique_ptr<LinkManager::InternalLink> LinkManager::parse_tg_link_query(Slice que
     // newbot?manager=<manager_bot_username>&username=<new_bot_username>&name=<new_bot_name>
     auto manager_bot_username = get_arg("manager");
     auto new_bot_username = get_arg("username");
-    if (is_valid_username(manager_bot_username) && is_valid_username(new_bot_username)) {
+    if (is_valid_username(manager_bot_username) && (new_bot_username.empty() || is_valid_username(new_bot_username))) {
       return td::make_unique<InternalLinkRequestManagedBot>(std::move(manager_bot_username),
                                                             std::move(new_bot_username), get_arg("name"));
     }
@@ -2659,6 +2685,12 @@ unique_ptr<LinkManager::InternalLink> LinkManager::parse_t_me_link_query(Slice q
       auto language_pack_id = path[1];
       return td::make_unique<InternalLinkLanguage>(std::move(language_pack_id));
     }
+  } else if (path[0] == "addstyle") {
+    if (path.size() >= 2 && is_valid_text_composition_style_name(path[1])) {
+      // /addstyle/<name>
+      auto style_name = path[1];
+      return td::make_unique<InternalLinkTextCompositionStyle>(std::move(style_name));
+    }
   } else if (path[0] == "addtheme") {
     if (path.size() >= 2 && is_valid_theme_name(path[1])) {
       // /addtheme/<name>
@@ -2744,9 +2776,13 @@ unique_ptr<LinkManager::InternalLink> LinkManager::parse_t_me_link_query(Slice q
       return td::make_unique<InternalLinkInstantView>(
           PSTRING() << get_t_me_url() << "iv" << copy_arg("url") << copy_arg("rhash"), get_arg("url"));
     }
-  } else if (path.size() >= 3u && path[0] == "newbot" && is_valid_username(path[1]) && is_valid_username(path[2])) {
+  } else if (path.size() >= 3u && path[0] == "newbot" && is_valid_username(path[1]) &&
+             (path[2].empty() || is_valid_username(path[2]))) {
     // /newbot/<manager_bot_username>/<new_bot_username>?name=<new_bot_name>
     return td::make_unique<InternalLinkRequestManagedBot>(string(path[1]), string(path[2]), get_arg("name"));
+  } else if (path.size() == 2u && path[0] == "newbot" && is_valid_username(path[1])) {
+    // /newbot/<manager_bot_username>?name=<new_bot_name>
+    return td::make_unique<InternalLinkRequestManagedBot>(string(path[1]), string(), get_arg("name"));
   } else if (is_valid_username(path[0]) && path[0] != "i") {
     if (path.size() >= 2 && to_integer<int64>(path[1]) > 0) {
       // /<username>/12345?single&thread=<thread_id>&comment=<message_id>&t=<media_timestamp>
@@ -3687,7 +3723,7 @@ Result<string> LinkManager::get_internal_link_impl(const td_api::InternalLinkTyp
           }
           return "tg://stars";
         }
-        case td_api::settingsSectionMyToncoins::ID:
+        case td_api::settingsSectionMyGrams::ID:
           return "tg://ton";
         case td_api::settingsSectionNotifications::ID: {
           const auto &subsection = static_cast<const td_api::settingsSectionNotifications *>(section_ptr)->subsection_;
@@ -3801,6 +3837,17 @@ Result<string> LinkManager::get_internal_link_impl(const td_api::InternalLinkTyp
                          << "&album=" << link->story_album_id_;
       } else {
         return PSTRING() << get_t_me_url() << link->story_album_owner_username_ << "/a/" << link->story_album_id_;
+      }
+    }
+    case td_api::internalLinkTypeTextCompositionStyle::ID: {
+      auto link = static_cast<const td_api::internalLinkTypeTextCompositionStyle *>(type_ptr);
+      if (!is_valid_text_composition_style_name(link->style_name_)) {
+        return Status::Error(400, "Invalid style name specified");
+      }
+      if (is_internal) {
+        return PSTRING() << "tg://addstyle?slug=" << url_encode(link->style_name_);
+      } else {
+        return PSTRING() << get_t_me_url() << "addstyle/" << url_encode(link->style_name_);
       }
     }
     case td_api::internalLinkTypeTheme::ID: {
@@ -4043,7 +4090,7 @@ void LinkManager::get_external_link_info(string &&link, Promise<td_api::object_p
       }
       send_closure(G()->link_manager(), &LinkManager::get_external_link_info, std::move(link), std::move(promise));
     });
-    return send_closure(G()->config_manager(), &ConfigManager::reget_config, std::move(query_promise));
+    return send_closure(G()->config_manager(), &ConfigManager::reload_config, std::move(query_promise));
   }
 
   if (autologin_token_.empty()) {
@@ -4427,9 +4474,10 @@ Result<CustomEmojiId> LinkManager::get_link_custom_emoji_id(Slice url) {
   return Status::Error(400, "Custom emoji URL must have an emoji identifier");
 }
 
-Result<LinkManager::DateFormat> LinkManager::get_link_date_format(Slice url) {
+Result<FormattedDate> LinkManager::get_link_formatted_date(Slice url) {
   TRY_RESULT(query, check_tg_url_host(url, "time"));
-  DateFormat result;
+  int32 date = 0;
+  string format;
   for (auto parameter : full_split(query, '&')) {
     Slice key;
     Slice value;
@@ -4439,16 +4487,16 @@ Result<LinkManager::DateFormat> LinkManager::get_link_date_format(Slice url) {
       if (r_date.is_error() || r_date.ok() <= 0) {
         return Status::Error(400, "Invalid Unix time specified");
       }
-      result.date_ = r_date.ok();
+      date = r_date.ok();
     }
     if (key == Slice("format")) {
-      result.format_ = value.str();
+      format = value.str();
     }
   }
-  if (result.date_ == 0) {
+  if (date == 0) {
     return Status::Error(400, "URL must have the corresponding Unix time");
   }
-  return std::move(result);
+  return FormattedDate::get_formatted_date(date, format);
 }
 
 Result<DialogBoostLinkInfo> LinkManager::get_dialog_boost_link_info(Slice url) {

@@ -184,20 +184,20 @@ OptionManager::OptionManager(Td *td)
   set_default_integer_option("checklist_task_count_max", is_test_dc ? 10 : 30);
   set_default_integer_option("suggested_post_star_count_min", 5);
   set_default_integer_option("suggested_post_star_count_max", 100000);
-  set_default_integer_option("suggested_post_toncoin_cent_count_min", 1);
-  set_default_integer_option("suggested_post_toncoin_cent_count_max", 1000000);
+  set_default_integer_option("suggested_post_gram_cent_count_min", 1);
+  set_default_integer_option("suggested_post_gram_cent_count_max", 1000000);
   set_default_integer_option("suggested_post_star_earnings_per_mille", 850);
-  set_default_integer_option("suggested_post_toncoin_earnings_per_mille", 850);
-  set_default_integer_option("million_toncoin_to_usd_rate", 3000000);
+  set_default_integer_option("suggested_post_gram_earnings_per_mille", 850);
+  set_default_integer_option("million_gram_to_usd_rate", 3000000);
   set_default_integer_option("suggested_post_lifetime_min", is_test_dc ? 120 : 86400);
   set_default_integer_option("suggested_post_send_delay_min", 300);
   set_default_integer_option("suggested_post_send_delay_max", 2678400);
   set_default_integer_option("star_withdrawal_count_max", is_test_dc ? 100 : 25000000);
   set_default_integer_option("gift_collection_count_max", 10);
   set_default_integer_option("gift_collection_size_max", 500);
-  set_default_integer_option("gift_resale_toncoin_cent_count_min", is_test_dc ? 5000 : 700);
-  set_default_integer_option("gift_resale_toncoin_cent_count_max", 10000000);
-  set_default_integer_option("gift_resale_toncoin_earnings_per_mille", 900);
+  set_default_integer_option("gift_resale_gram_cent_count_min", is_test_dc ? 5000 : 700);
+  set_default_integer_option("gift_resale_gram_cent_count_max", 10000000);
+  set_default_integer_option("gift_resale_gram_earnings_per_mille", 900);
   set_default_integer_option("story_album_count_max", is_test_dc ? 20 : 100);
   set_default_integer_option("story_album_size_max", is_test_dc ? 200 : 1000);
   set_default_integer_option("pending_text_message_period", 30);
@@ -211,6 +211,16 @@ OptionManager::OptionManager(Td *td)
   set_default_integer_option("has_protected_content_disable_request_duration", is_test_dc ? 300 : 86400);
   set_default_integer_option("poll_open_period_max", 730 * 3600);
   set_default_integer_option("owned_bot_count_max", 20);
+  set_default_integer_option("text_composition_style_example_count", 3);
+  set_default_integer_option("text_composition_style_title_length_max", 12);
+  set_default_integer_option("text_composition_style_prompt_length_max", 1024);
+  set_default_integer_option("poll_country_count_max", 12);
+  set_default_integer_option("message_text_length_max", 4096);
+  set_default_integer_option("rich_message_text_length_max", 32768);
+  set_default_integer_option("rich_message_block_count_max", 500);
+  set_default_integer_option("rich_message_depth_max", 16);
+  set_default_integer_option("rich_message_media_count_max", 50);
+  set_default_integer_option("rich_message_table_column_count_max", 20);
 
   if (options.isset("my_phone_number") || !options.isset("my_id")) {
     update_premium_options();
@@ -232,6 +242,14 @@ OptionManager::OptionManager(Td *td)
   set_option_empty("user_rating_learn_more_url");
   set_option_empty("gift_collection_gift_count_max");
   set_option_empty("story_album_story_count_max");
+  set_option_empty("suggested_post_toncoin_cent_count_min");
+  set_option_empty("suggested_post_toncoin_cent_count_max");
+  set_option_empty("suggested_post_toncoin_earnings_per_mille");
+  set_option_empty("million_toncoin_to_usd_rate");
+  set_option_empty("gift_resale_toncoin_cent_count_min");
+  set_option_empty("gift_resale_toncoin_cent_count_max");
+  set_option_empty("gift_resale_toncoin_earnings_per_mille");
+  set_option_empty("toncoin_top_up_url");
 }
 
 OptionManager::~OptionManager() = default;
@@ -259,9 +277,9 @@ void OptionManager::update_premium_options() {
     set_option_integer("monthly_sent_story_count_max", get_option_integer("stories_sent_monthly_limit_premium", 3000));
     set_option_integer("story_suggested_reaction_area_count_max",
                        get_option_integer("stories_suggested_reactions_limit_premium", 5));
-    set_option_integer("story_suggested_reaction_area_count_max",
-                       get_option_integer("stories_suggested_reactions_limit_premium", 5));
     set_option_integer("owned_bot_count_max", get_option_integer("bots_create_limit_premium", 40));
+    set_option_integer("added_text_composition_style_count_max",
+                       get_option_integer("aicompose_tone_saved_limit_premium", 20));
 
     set_option_boolean("can_set_new_chat_privacy_settings", true);
     set_option_boolean("can_use_text_entities_in_story_caption", true);
@@ -287,6 +305,8 @@ void OptionManager::update_premium_options() {
     set_option_integer("story_suggested_reaction_area_count_max",
                        get_option_integer("stories_suggested_reactions_limit_default", 1));
     set_option_integer("owned_bot_count_max", get_option_integer("bots_create_limit_default", 20));
+    set_option_integer("added_text_composition_style_count_max",
+                       get_option_integer("aicompose_tone_saved_limit_default", 5));
 
     set_option_boolean("can_set_new_chat_privacy_settings", !get_option_boolean("need_premium_for_new_chat_privacy"));
     set_option_boolean("can_use_text_entities_in_story_caption",
@@ -418,6 +438,8 @@ bool OptionManager::is_internal_option(Slice name) {
   static const FlatHashSet<Slice, SliceHash> internal_options{"about_length_limit_default",
                                                               "about_length_limit_premium",
                                                               "aggressive_anti_spam_supergroup_member_count_min",
+                                                              "aicompose_tone_saved_limit_default",
+                                                              "aicompose_tone_saved_limit_premium",
                                                               "animated_emoji_zoom",
                                                               "animation_search_emojis",
                                                               "animation_search_provider",
@@ -477,6 +499,8 @@ bool OptionManager::is_internal_option(Slice name) {
                                                               "hidden_members_group_size_min",
                                                               "ignored_restriction_reasons",
                                                               "language_pack_version",
+                                                              "message_length_limit_default",
+                                                              "message_length_limit_premium",
                                                               "my_phone_number",
                                                               "need_premium_for_new_chat_privacy",
                                                               "need_premium_for_story_caption_entities",
@@ -486,6 +510,7 @@ bool OptionManager::is_internal_option(Slice name) {
                                                               "online_cloud_timeout_ms",
                                                               "online_update_period_ms",
                                                               "otherwise_relogin_days",
+                                                              "phone_country_iso2",
                                                               "pm_read_date_expire_period",
                                                               "poll_answer_delete_period",
                                                               "premium_bot_username",
@@ -552,7 +577,7 @@ td_api::object_ptr<td_api::Update> OptionManager::get_internal_option_update(Sli
   }
   if (name == "whitelisted_bots") {
     return td_api::make_object<td_api::updateTrustedMiniAppBots>(
-        transform(full_split(get_option_string(name), ','), to_integer<int64>));
+        transform(full_split(get_option_string(name), ','), [](const auto &str) { return to_integer<int64>(str); }));
   }
   return nullptr;
 }
@@ -662,7 +687,7 @@ void OptionManager::on_option_updated(Slice name) {
       break;
     case 'm':
       if (name == "my_phone_number") {
-        send_closure(G()->config_manager(), &ConfigManager::reget_config, Promise<Unit>());
+        send_closure(G()->config_manager(), &ConfigManager::reload_config, Promise<Unit>());
       }
       break;
     case 'n':
@@ -783,7 +808,7 @@ td_api::object_ptr<td_api::OptionValue> OptionManager::get_option_synchronously(
       break;
     case 'v':
       if (name == "version") {
-        return td_api::make_object<td_api::optionValueString>("1.8.63");
+        return td_api::make_object<td_api::optionValueString>("1.8.66");
       }
       break;
   }

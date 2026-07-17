@@ -14,8 +14,10 @@
 #include "td/telegram/td_api.h"
 #include "td/telegram/telegram_api.h"
 #include "td/telegram/UserId.h"
+#include "td/telegram/WebPageId.h"
 
 #include "td/utils/common.h"
+#include "td/utils/Status.h"
 
 #include <utility>
 
@@ -43,6 +45,12 @@ struct PollOption {
   PollOption(Td *td, telegram_api::object_ptr<telegram_api::PollAnswer> &&poll_answer_ptr,
              vector<std::pair<ChannelId, MinChannel>> &min_channels);
 
+  static Result<PollOption> get_poll_option(Td *td, DialogId dialog_id,
+                                            td_api::object_ptr<td_api::inputPollOption> &&input_poll_option);
+
+  static Result<vector<PollOption>> get_poll_options(
+      Td *td, DialogId dialog_id, vector<td_api::object_ptr<td_api::inputPollOption>> &&input_poll_options);
+
   const string &get_data() const {
     return data_;
   }
@@ -55,13 +63,18 @@ struct PollOption {
     return added_date_;
   }
 
+  WebPageId get_web_page_id() const;
+
+  void remove_web_page();
+
   PollOption dup_option(Td *td, DialogId dialog_id) const;
 
   void append_file_ids(const Td *td, vector<FileId> &file_ids) const;
 
   td_api::object_ptr<td_api::pollOption> get_poll_option_object(Td *td) const;
 
-  telegram_api::object_ptr<telegram_api::PollAnswer> get_input_poll_answer() const;
+  telegram_api::object_ptr<telegram_api::PollAnswer> get_input_poll_answer(
+      telegram_api::object_ptr<telegram_api::InputMedia> &&input_media) const;
 
   static vector<PollOption> get_poll_options(Td *td,
                                              vector<telegram_api::object_ptr<telegram_api::PollAnswer>> &&poll_answers,

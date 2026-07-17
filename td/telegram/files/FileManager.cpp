@@ -4382,14 +4382,75 @@ vector<tl_object_ptr<telegram_api::InputDocument>> FileManager::get_input_docume
   return result;
 }
 
-bool FileManager::extract_was_uploaded(const telegram_api::object_ptr<telegram_api::InputMedia> &input_media) {
+bool FileManager::extract_was_uploaded(const InputMedia &input_media) {
+  if (input_media.rich_message_ != nullptr) {
+    return extract_was_uploaded(input_media.rich_message_);
+  } else {
+    return extract_was_uploaded(input_media.media_);
+  }
+}
+
+bool FileManager::extract_was_thumbnail_uploaded(const InputMedia &input_media) {
+  if (input_media.rich_message_ != nullptr) {
+    return extract_was_thumbnail_uploaded(input_media.rich_message_);
+  } else {
+    return extract_was_thumbnail_uploaded(input_media.media_);
+  }
+}
+
+string FileManager::extract_file_reference(const InputMedia &input_media) {
+  if (input_media.rich_message_ != nullptr) {
+    return extract_file_reference(input_media.rich_message_);
+  } else {
+    return extract_file_reference(input_media.media_);
+  }
+}
+
+vector<string> FileManager::extract_file_references(const InputMedia &input_media) {
+  if (input_media.rich_message_ != nullptr) {
+    return extract_file_references(input_media.rich_message_);
+  } else {
+    return extract_file_references(input_media.media_);
+  }
+}
+
+string FileManager::extract_cover_file_reference(const InputMedia &input_media) {
+  if (input_media.rich_message_ != nullptr) {
+    return extract_cover_file_reference(input_media.rich_message_);
+  } else {
+    return extract_cover_file_reference(input_media.media_);
+  }
+}
+
+vector<string> FileManager::extract_cover_file_references(const InputMedia &input_media) {
+  if (input_media.rich_message_ != nullptr) {
+    return extract_cover_file_references(input_media.rich_message_);
+  } else {
+    return extract_cover_file_references(input_media.media_);
+  }
+}
+
+vector<const telegram_api::InputMedia *> FileManager::get_poll_media(const telegram_api::InputMedia *input_media) {
+  CHECK(input_media->get_id() == telegram_api::inputMediaPoll::ID);
+  const auto *poll = static_cast<const telegram_api::inputMediaPoll *>(input_media);
+  vector<const telegram_api::InputMedia *> result;
+  result.push_back(poll->attached_media_.get());
+  result.push_back(poll->solution_media_.get());
+  for (auto &answer : poll->poll_->answers_) {
+    CHECK(answer->get_id() == telegram_api::inputPollAnswer::ID);
+    result.push_back(static_cast<const telegram_api::inputPollAnswer *>(answer.get())->media_.get());
+  }
+  return result;
+}
+
+bool FileManager::extract_was_uploaded(const telegram_api::InputMedia *input_media) {
   if (input_media == nullptr) {
     return false;
   }
 
   auto input_media_id = input_media->get_id();
   if (input_media_id == telegram_api::inputMediaPaidMedia::ID) {
-    auto &extended_media = static_cast<const telegram_api::inputMediaPaidMedia *>(input_media.get())->extended_media_;
+    auto &extended_media = static_cast<const telegram_api::inputMediaPaidMedia *>(input_media)->extended_media_;
     if (extended_media.size() > 1u) {
       for (auto &media : extended_media) {
         CHECK(!extract_was_uploaded(media));
@@ -4399,20 +4460,29 @@ bool FileManager::extract_was_uploaded(const telegram_api::object_ptr<telegram_a
     CHECK(extended_media.size() == 1u);
     return extract_was_uploaded(extended_media[0]);
   }
+  if (input_media_id == telegram_api::inputMediaPoll::ID) {
+    for (auto &media : get_poll_media(input_media)) {
+      CHECK(!extract_was_uploaded(media));
+    }
+    return false;
+  }
   return input_media_id == telegram_api::inputMediaUploadedPhoto::ID ||
          input_media_id == telegram_api::inputMediaUploadedDocument::ID;
 }
 
-bool FileManager::extract_was_thumbnail_uploaded(
-    const telegram_api::object_ptr<telegram_api::InputMedia> &input_media) {
+bool FileManager::extract_was_uploaded(const telegram_api::object_ptr<telegram_api::InputMedia> &input_media) {
+  return extract_was_uploaded(input_media.get());
+}
+
+bool FileManager::extract_was_thumbnail_uploaded(const telegram_api::InputMedia *input_media) {
   if (input_media == nullptr) {
     return false;
   }
   switch (input_media->get_id()) {
     case telegram_api::inputMediaUploadedDocument::ID:
-      return static_cast<const telegram_api::inputMediaUploadedDocument *>(input_media.get())->thumb_ != nullptr;
+      return static_cast<const telegram_api::inputMediaUploadedDocument *>(input_media)->thumb_ != nullptr;
     case telegram_api::inputMediaPaidMedia::ID: {
-      auto &extended_media = static_cast<const telegram_api::inputMediaPaidMedia *>(input_media.get())->extended_media_;
+      auto &extended_media = static_cast<const telegram_api::inputMediaPaidMedia *>(input_media)->extended_media_;
       if (extended_media.size() > 1u) {
         for (auto &media : extended_media) {
           CHECK(!extract_was_thumbnail_uploaded(media));
@@ -4422,26 +4492,37 @@ bool FileManager::extract_was_thumbnail_uploaded(
       CHECK(extended_media.size() == 1u);
       return extract_was_thumbnail_uploaded(extended_media[0]);
     }
+    case telegram_api::inputMediaPoll::ID:
+      for (auto &media : get_poll_media(input_media)) {
+        CHECK(!extract_was_thumbnail_uploaded(media));
+      }
+      return false;
     default:
       return false;
   }
 }
 
-string FileManager::extract_file_reference(const telegram_api::object_ptr<telegram_api::InputMedia> &input_media) {
+bool FileManager::extract_was_thumbnail_uploaded(
+    const telegram_api::object_ptr<telegram_api::InputMedia> &input_media) {
+  return extract_was_thumbnail_uploaded(input_media.get());
+}
+
+string FileManager::extract_file_reference(const telegram_api::InputMedia *input_media) {
   if (input_media == nullptr) {
     return string();
   }
 
   switch (input_media->get_id()) {
     case telegram_api::inputMediaDocument::ID:
-      return extract_file_reference(static_cast<const telegram_api::inputMediaDocument *>(input_media.get())->id_);
+      return extract_file_reference(static_cast<const telegram_api::inputMediaDocument *>(input_media)->id_);
     case telegram_api::inputMediaPhoto::ID:
-      return extract_file_reference(static_cast<const telegram_api::inputMediaPhoto *>(input_media.get())->id_);
+      return extract_file_reference(static_cast<const telegram_api::inputMediaPhoto *>(input_media)->id_);
     case telegram_api::inputMediaPaidMedia::ID:
+    case telegram_api::inputMediaPoll::ID:
       UNREACHABLE();
       return string();
     case telegram_api::inputMediaUploadedDocument::ID: {
-      auto uploaded_document = static_cast<const telegram_api::inputMediaUploadedDocument *>(input_media.get());
+      auto uploaded_document = static_cast<const telegram_api::inputMediaUploadedDocument *>(input_media);
       if (uploaded_document->file_->get_id() != telegram_api::inputFileStoryDocument::ID) {
         return string();
       }
@@ -4451,6 +4532,10 @@ string FileManager::extract_file_reference(const telegram_api::object_ptr<telegr
     default:
       return string();
   }
+}
+
+string FileManager::extract_file_reference(const telegram_api::object_ptr<telegram_api::InputMedia> &input_media) {
+  return extract_file_reference(input_media.get());
 }
 
 vector<string> FileManager::extract_file_references(
@@ -4467,36 +4552,42 @@ vector<string> FileManager::extract_file_references(
                        [](const telegram_api::object_ptr<telegram_api::InputMedia> &media) {
                          return extract_file_reference(media);
                        });
+    case telegram_api::inputMediaPoll::ID:
+      return transform(get_poll_media(input_media.get()),
+                       [](const telegram_api::InputMedia *media) { return extract_file_reference(media); });
     default:
       return {};
   }
 }
 
-string FileManager::extract_cover_file_reference(
-    const telegram_api::object_ptr<telegram_api::InputMedia> &input_media) {
+string FileManager::extract_cover_file_reference(const telegram_api::InputMedia *input_media) {
   if (input_media == nullptr) {
     return string();
   }
 
   switch (input_media->get_id()) {
     case telegram_api::inputMediaDocument::ID:
-      return extract_file_reference(
-          static_cast<const telegram_api::inputMediaDocument *>(input_media.get())->video_cover_);
+      return extract_file_reference(static_cast<const telegram_api::inputMediaDocument *>(input_media)->video_cover_);
     case telegram_api::inputMediaDocumentExternal::ID:
       return extract_file_reference(
-          static_cast<const telegram_api::inputMediaDocumentExternal *>(input_media.get())->video_cover_);
+          static_cast<const telegram_api::inputMediaDocumentExternal *>(input_media)->video_cover_);
     case telegram_api::inputMediaUploadedDocument::ID:
       return extract_file_reference(
-          static_cast<const telegram_api::inputMediaUploadedDocument *>(input_media.get())->video_cover_);
+          static_cast<const telegram_api::inputMediaUploadedDocument *>(input_media)->video_cover_);
     case telegram_api::inputMediaUploadedPhoto::ID:
-      return extract_file_reference(
-          static_cast<const telegram_api::inputMediaUploadedPhoto *>(input_media.get())->video_);
+      return extract_file_reference(static_cast<const telegram_api::inputMediaUploadedPhoto *>(input_media)->video_);
     case telegram_api::inputMediaPaidMedia::ID:
+    case telegram_api::inputMediaPoll::ID:
       UNREACHABLE();
       return string();
     default:
       return string();
   }
+}
+
+string FileManager::extract_cover_file_reference(
+    const telegram_api::object_ptr<telegram_api::InputMedia> &input_media) {
+  return extract_cover_file_reference(input_media.get());
 }
 
 vector<string> FileManager::extract_cover_file_references(
@@ -4515,6 +4606,9 @@ vector<string> FileManager::extract_cover_file_references(
                        [](const telegram_api::object_ptr<telegram_api::InputMedia> &media) {
                          return extract_cover_file_reference(media);
                        });
+    case telegram_api::inputMediaPoll::ID:
+      return transform(get_poll_media(input_media.get()),
+                       [](const telegram_api::InputMedia *media) { return extract_cover_file_reference(media); });
     default:
       return {};
   }
@@ -4548,6 +4642,83 @@ string FileManager::extract_file_reference(
   }
 
   return extract_file_reference(static_cast<const telegram_api::inputChatPhoto *>(input_chat_photo.get())->id_);
+}
+
+bool FileManager::extract_was_uploaded(
+    const telegram_api::object_ptr<telegram_api::InputRichMessage> &input_rich_message) {
+  return false;
+}
+
+bool FileManager::extract_was_thumbnail_uploaded(
+    const telegram_api::object_ptr<telegram_api::InputRichMessage> &input_rich_message) {
+  return false;
+}
+
+string FileManager::extract_file_reference(
+    const telegram_api::object_ptr<telegram_api::InputRichMessage> &input_rich_message) {
+  UNREACHABLE();
+}
+
+vector<string> FileManager::extract_file_references(
+    const vector<telegram_api::object_ptr<telegram_api::InputRichFile>> &input_rich_files) {
+  vector<string> result;
+  for (const auto &file : input_rich_files) {
+    CHECK(file != nullptr);
+    switch (file->get_id()) {
+      case telegram_api::inputRichFilePhoto::ID:
+        result.push_back(
+            extract_file_reference(static_cast<const telegram_api::inputRichFilePhoto *>(file.get())->photo_));
+        break;
+      case telegram_api::inputRichFileDocument::ID:
+        result.push_back(
+            extract_file_reference(static_cast<const telegram_api::inputRichFileDocument *>(file.get())->document_));
+        break;
+      default:
+        UNREACHABLE();
+    }
+  }
+  return result;
+}
+
+vector<string> FileManager::extract_file_references(
+    const telegram_api::object_ptr<telegram_api::InputRichMessage> &input_rich_message) {
+  if (input_rich_message == nullptr) {
+    return {};
+  }
+  switch (input_rich_message->get_id()) {
+    case telegram_api::inputRichMessage::ID: {
+      auto *message = static_cast<const telegram_api::inputRichMessage *>(input_rich_message.get());
+      vector<string> result;
+      for (const auto &photo : message->photos_) {
+        result.push_back(extract_file_reference(photo));
+      }
+      for (const auto &document : message->documents_) {
+        result.push_back(extract_file_reference(document));
+      }
+      return result;
+    }
+    case telegram_api::inputRichMessageHTML::ID: {
+      return extract_file_references(
+          static_cast<const telegram_api::inputRichMessageHTML *>(input_rich_message.get())->files_);
+    }
+    case telegram_api::inputRichMessageMarkdown::ID: {
+      return extract_file_references(
+          static_cast<const telegram_api::inputRichMessageMarkdown *>(input_rich_message.get())->files_);
+    }
+    default:
+      UNREACHABLE();
+      return {};
+  }
+}
+
+string FileManager::extract_cover_file_reference(
+    const telegram_api::object_ptr<telegram_api::InputRichMessage> &input_rich_message) {
+  UNREACHABLE();
+}
+
+vector<string> FileManager::extract_cover_file_references(
+    const telegram_api::object_ptr<telegram_api::InputRichMessage> &input_rich_message) {
+  return {};
 }
 
 FileId FileManager::next_file_id() {
