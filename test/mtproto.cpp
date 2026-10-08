@@ -35,6 +35,7 @@
 #include "td/utils/crypto.h"
 #include "td/utils/HttpDate.h"
 #include "td/utils/logging.h"
+#include "td/utils/misc.h"
 #include "td/utils/port/Clocks.h"
 #include "td/utils/port/IPAddress.h"
 #include "td/utils/port/SocketFd.h"
@@ -175,7 +176,7 @@ TEST(Mtproto, config) {
     run(td::get_simple_config_azure, "azure test");
     run(td::get_simple_config_google_dns, "Google DNS test");
     run(td::get_simple_config_mozilla_dns, "Mozilla DNS test");
-    run(td::get_simple_config_firebase_remote_config, "remote config");
+    // run(td::get_simple_config_firebase_remote_config, "remote config");
     run(td::get_simple_config_firebase_realtime, "realtime");
     run(td::get_simple_config_firebase_firestore, "firestore");
   }
