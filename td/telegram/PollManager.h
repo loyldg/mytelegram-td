@@ -10,6 +10,7 @@
 #include "td/telegram/DialogId.h"
 #include "td/telegram/files/FileId.h"
 #include "td/telegram/ForumTopicId.h"
+#include "td/telegram/MessageContentUploadId.h"
 #include "td/telegram/MessageEntity.h"
 #include "td/telegram/MessageFullId.h"
 #include "td/telegram/MessageId.h"
@@ -20,6 +21,7 @@
 #include "td/telegram/ReplyMarkup.h"
 #include "td/telegram/td_api.h"
 #include "td/telegram/telegram_api.h"
+#include "td/telegram/WebPageId.h"
 
 #include "td/actor/actor.h"
 #include "td/actor/MultiTimeout.h"
@@ -33,6 +35,7 @@
 #include "td/utils/WaitFreeHashMap.h"
 #include "td/utils/WaitFreeHashSet.h"
 
+#include <memory>
 #include <utility>
 
 namespace td {
@@ -56,12 +59,12 @@ class PollManager final : public Actor {
   static Status check_quiz_correct_option_ids(const vector<int32> &correct_option_ids, size_t option_count,
                                               bool allow_empty);
 
-  PollId create_poll(FormattedText &&question, vector<FormattedText> &&options, bool is_anonymous,
+  PollId create_poll(FormattedText &&question, vector<PollOption> &&options, bool is_anonymous,
                      bool allow_multiple_answers, bool has_open_answers, bool has_revoting_disabled,
-                     bool shuffle_answers, bool hide_results_until_close, bool is_quiz,
-                     vector<int32> correct_option_ids, FormattedText &&explanation,
-                     unique_ptr<MessageContent> &&explanation_media, int32 open_period, int32 close_date,
-                     bool is_closed);
+                     bool subscribers_only, vector<string> &&country_codes, bool shuffle_answers,
+                     bool hide_results_until_close, bool is_quiz, vector<int32> correct_option_ids,
+                     FormattedText &&explanation, unique_ptr<MessageContent> &&explanation_media, int32 open_period,
+                     int32 close_date, bool is_closed);
 
   void register_poll(PollId poll_id, MessageFullId message_full_id, const char *source);
 
@@ -76,6 +79,8 @@ class PollManager final : public Actor {
   bool get_poll_is_anonymous(PollId poll_id) const;
 
   bool get_poll_can_add_option(PollId poll_id) const;
+
+  bool get_poll_can_view_stats(PollId poll_id) const;
 
   bool get_poll_has_unread_votes(PollId poll_id) const;
 
@@ -93,6 +98,8 @@ class PollManager final : public Actor {
   void add_poll_option(MessageFullId message_full_id, td_api::object_ptr<td_api::inputPollOption> &&option,
                        Promise<Unit> &&promise);
 
+  void cancel_add_poll_option(MessageContentUploadId upload_id, Status status);
+
   void delete_poll_option(MessageFullId message_full_id, const string &option_id, Promise<Unit> &&promise);
 
   void set_poll_answer(MessageFullId message_full_id, vector<int32> &&option_ids, Promise<Unit> &&promise);
@@ -105,11 +112,27 @@ class PollManager final : public Actor {
 
   void stop_local_poll(PollId poll_id);
 
+  void delete_pending_web_page(PollId poll_id, WebPageId web_page_id);
+
+  vector<unique_ptr<MessageContent>> get_individual_message_contents(PollId poll_id,
+                                                                     const MessageContent *attached_media) const;
+
+  vector<MessageContent *> get_individual_message_content_refs(PollId poll_id, MessageContent *attached_media);
+
+  vector<const MessageContent *> get_individual_message_content_refs(PollId poll_id,
+                                                                     const MessageContent *attached_media) const;
+
+  unique_ptr<MessageContent> &get_individual_message_content(PollId poll_id, unique_ptr<MessageContent> &attached_media,
+                                                             int32 media_pos);
+
+  void notify_on_poll_update(PollId poll_id);
+
   PollId dup_poll(DialogId dialog_id, PollId poll_id);
 
   bool has_input_media(PollId poll_id) const;
 
-  tl_object_ptr<telegram_api::InputMedia> get_input_media(PollId poll_id) const;
+  telegram_api::object_ptr<telegram_api::InputMedia> get_input_media(
+      PollId poll_id, vector<telegram_api::object_ptr<telegram_api::InputMedia>> &&input_media) const;
 
   PollId on_get_poll(PollId poll_id, tl_object_ptr<telegram_api::poll> &&poll_server,
                      tl_object_ptr<telegram_api::pollResults> &&poll_results, const char *source);
@@ -120,7 +143,9 @@ class PollManager final : public Actor {
 
   void on_get_poll_vote(PollId poll_id, DialogId dialog_id, vector<BufferSlice> &&options, vector<int32> positions);
 
-  td_api::object_ptr<td_api::poll> get_poll_object(PollId poll_id) const;
+  td_api::object_ptr<td_api::poll> get_poll_object(PollId poll_id, DialogId dialog_id, MessageId message_id,
+                                                   DialogId initial_dialog_id, int32 initial_date,
+                                                   bool is_real_message_content) const;
 
   void on_binlog_events(vector<BinlogEvent> &&events);
 
@@ -147,10 +172,12 @@ class PollManager final : public Actor {
     int32 open_period_ = 0;
     int32 close_date_ = 0;
     int64 hash_ = 0;
+    vector<string> country_codes_;
     bool is_anonymous_ = true;
     bool allow_multiple_answers_ = false;
     bool has_open_answers_ = false;
     bool has_revoting_disabled_ = false;
+    bool subscribers_only_ = false;
     bool shuffle_answers_ = false;
     bool hide_results_until_close_ = false;
     bool is_quiz_ = false;
@@ -158,6 +185,7 @@ class PollManager final : public Actor {
     bool is_updated_after_close_ = false;
     bool is_creator_ = false;
     bool has_unread_votes_ = false;
+    bool can_view_stats_ = false;
     mutable bool was_saved_ = false;
 
     template <class StorerT>
@@ -178,6 +206,8 @@ class PollManager final : public Actor {
 
   class SetPollAnswerLogEvent;
   class StopPollLogEvent;
+
+  class UploadPollOptionContentCallback;
 
   void start_up() final;
   void tear_down() final;
@@ -202,8 +232,6 @@ class PollManager final : public Actor {
 
   void schedule_poll_unload(PollId poll_id);
 
-  void notify_on_poll_update(PollId poll_id);
-
   void notify_on_poll_has_unread_votes_update(PollId poll_id, bool has_unread_votes);
 
   static string get_poll_database_key(PollId poll_id);
@@ -227,7 +255,15 @@ class PollManager final : public Actor {
   bool can_delete_poll_option(const Poll *poll, const PollOption *option, MessageId message_id, bool is_forward,
                               bool is_outgoing);
 
-  td_api::object_ptr<td_api::poll> get_poll_object(PollId poll_id, const Poll *poll) const;
+  bool is_poll_vote_subscribers_only_limited(const Poll *poll, DialogId initial_dialog_id, int32 initial_date) const;
+
+  td_api::object_ptr<td_api::PollVoteRestrictionReason> get_poll_vote_restriction_reason_object(
+      PollId poll_id, const Poll *poll, DialogId dialog_id, MessageId message_id, DialogId initial_dialog_id,
+      int32 initial_date, bool is_real_message_content) const;
+
+  td_api::object_ptr<td_api::poll> get_poll_object(PollId poll_id, const Poll *poll, DialogId dialog_id,
+                                                   MessageId message_id, DialogId initial_dialog_id, int32 initial_date,
+                                                   bool is_real_message_content) const;
 
   void on_get_poll_results(PollId poll_id, uint64 generation, Result<tl_object_ptr<telegram_api::Updates>> result);
 
@@ -258,7 +294,9 @@ class PollManager final : public Actor {
 
   void forget_local_poll(PollId poll_id);
 
-  bool can_get_poll_voters(PollId poll_id, const Poll *poll) const;
+  bool can_get_poll_voters(PollId poll_id, const Poll *poll, DialogId initial_dialog_id, int32 initial_date) const;
+
+  static vector<WebPageId> get_poll_web_page_ids(const Poll *poll);
 
   MultiTimeout update_poll_timeout_{"UpdatePollTimeout"};
   MultiTimeout close_poll_timeout_{"ClosePollTimeout"};
@@ -286,6 +324,15 @@ class PollManager final : public Actor {
   int64 current_local_poll_id_ = 0;
 
   uint64 current_generation_ = 0;
+
+  struct AddPollOptionQuery {
+    MessageFullId message_full_id_;
+    PollOption option_;
+    Promise<Unit> promise_;
+  };
+  FlatHashMap<MessageContentUploadId, AddPollOptionQuery, MessageContentUploadIdHash> add_poll_option_queries_;
+
+  std::shared_ptr<UploadPollOptionContentCallback> upload_poll_option_content_callback_;
 
   FlatHashSet<PollId, PollIdHash> loaded_from_database_polls_;
 
