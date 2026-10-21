@@ -1357,6 +1357,9 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
   string whitelisted_bots;
   string ton_stakedice_stake_suggested_amounts;
   string gift_craft_probabilities;
+  int32 wallet_gasless_daily_transfers = 0;
+  vector<string> bot_allowed_suffixes;
+  vector<string> wallet_card_background_gifts;
 
   // {"stories_all_hidden", "archive_all_stories"}
   static const FlatHashMap<Slice, Slice, SliceHash> bool_keys = {
@@ -1369,8 +1372,10 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
       {"settings_display_passkeys", "can_use_login_passkey"},
       {"stars_gifts_enabled", "can_gift_stars"},
       {"stars_paid_messages_available", "can_enable_paid_messages"},
+      {"stars_spend_topup_invoice_disabled", "star_top_up_disabled"},
       {"story_weather_preload", "can_preload_weather"},
-      {"video_ignore_alt_documents", ""}};
+      {"video_ignore_alt_documents", ""},
+      {"wallet_available", "can_use_ton_wallet"}};
 
   static const FlatHashMap<Slice, Slice, SliceHash> integer_keys = {
       {"aicompose_tone_examples_num", "text_composition_style_example_count"},
@@ -1379,6 +1384,7 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
       {"authorization_autoconfirm_period", ""},
       {"boosts_channel_level_max", "chat_boost_level_max"},
       {"boosts_per_sent_gift", "premium_gift_boost_count"},
+      {"bot_additional_usernames_limit", "secondary_bot_username_count_max"},
       {"bot_preview_medias_max", "bot_media_preview_count_max"},
       {"bot_verification_description_length_limit", "bot_verification_custom_description_length_max"},
       {"business_chat_links_limit", "business_chat_link_count_max"},
@@ -1487,7 +1493,9 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
       {"stories_changelog_user_id", "stories_changelog_user_id"},
       {"telegram_antispam_user_id", "anti_spam_bot_user_id"},
       {"ton_stakedice_stake_amount_max", "stake_dice_stake_amount_max"},
-      {"ton_stakedice_stake_amount_min", "stake_dice_stake_amount_min"}};
+      {"ton_stakedice_stake_amount_min", "stake_dice_stake_amount_min"},
+      {"wallet_gasless_min_nanos", "ton_wallet_gasless_transfer_amount_min"},
+      {"wallet_transfer_min_nanos", "ton_wallet_transfer_amount_min"}};
   static const FlatHashMap<Slice, Slice, SliceHash> string_keys = {
       {"gif_search_branding", "animation_search_provider"},
       {"music_search_username", "audio_search_bot_username"},
@@ -1502,9 +1510,10 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
       {"channel_color_level_min", "default_emoji_statuses_stickerset_id", "dialog_filters_enabled",
        "dialog_filters_tooltip", "forum_upgrade_participants_min", "getfile_experimental_params",
        "giveaway_gifts_purchase_available", "groupcall_video_participants_max", "ios_display_passkeys",
-       "message_animated_emoji_max", "qr_login_camera", "qr_login_code", "stargifts_blocked", "starref_connect_allowed",
-       "starref_program_allowed", "stars_purchase_blocked", "stars_rating_learnmore_url", "stickers_emoji_cache_time",
-       "stories_export_nopublic_link", "stories_posting", "story_expire_period", "test", "upload_max_fileparts_default",
+       "message_animated_emoji_max", "qr_login_camera", "qr_login_code", "round_video_recorder_2_allowed",
+       "stargifts_blocked", "starref_connect_allowed", "starref_program_allowed", "stars_purchase_blocked",
+       "stars_rating_learnmore_url", "stickers_emoji_cache_time", "stories_export_nopublic_link", "stories_posting",
+       "story_expire_period", "test", "upload_max_fileparts_default",
        //
        "upload_max_fileparts_premium"});
   if (config->get_id() == telegram_api::jsonObject::ID) {
@@ -1885,7 +1894,7 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
           for (auto &prefix : prefixes) {
             auto prefix_text = get_json_value_string(std::move(prefix), key);
             if (!prefix_text.empty() && prefix_text.find(' ') == string::npos) {
-              fragment_prefixes.push_back(prefix_text);
+              starref_start_param_prefixes.push_back(prefix_text);
             } else {
               LOG(ERROR) << "Receive an invalid affiliate program link prefix";
             }
@@ -2035,6 +2044,43 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
         }
         continue;
       }
+      if (key == "wallet_gasless_daily_transfers") {
+        wallet_gasless_daily_transfers = get_json_value_int(std::move(key_value->value_), key);
+        continue;
+      }
+      if (key == "bot_allowed_suffixes") {
+        if (value->get_id() == telegram_api::jsonArray::ID) {
+          auto suffixes = std::move(static_cast<telegram_api::jsonArray *>(value)->value_);
+          for (auto &suffix : suffixes) {
+            auto suffix_text = get_json_value_string(std::move(suffix), key);
+            to_lower_inplace(suffix_text);
+            if (!suffix_text.empty() && suffix_text.find(' ') == string::npos) {
+              bot_allowed_suffixes.push_back(suffix_text);
+            } else {
+              LOG(ERROR) << "Receive an invalid bot suffix";
+            }
+          }
+        } else {
+          LOG(ERROR) << "Receive unexpected bot_allowed_suffixes " << to_string(*value);
+        }
+        continue;
+      }
+      if (key == "wallet_card_bg_gifts") {
+        if (value->get_id() == telegram_api::jsonArray::ID) {
+          auto gifts = std::move(static_cast<telegram_api::jsonArray *>(value)->value_);
+          for (auto &gift : gifts) {
+            auto gift_name = get_json_value_string(std::move(gift), key);
+            if (!gift_name.empty() && gift_name.find('\xFF') == string::npos) {
+              wallet_card_background_gifts.push_back(gift_name);
+            } else {
+              LOG(ERROR) << "Receive an invalid wallet card background gift name";
+            }
+          }
+        } else {
+          LOG(ERROR) << "Receive unexpected wallet_card_bg_gifts " << to_string(*value);
+        }
+        continue;
+      }
 
       new_values.push_back(std::move(key_value));
     }
@@ -2103,6 +2149,14 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
     options.set_option_string("starref_start_param_prefixes", implode(starref_start_param_prefixes, ' '));
   }
 
+  options.set_option_string("bot_allowed_suffixes", implode(bot_allowed_suffixes, ' '));
+
+  if (wallet_card_background_gifts.empty()) {
+    options.set_option_empty("ton_wallet_card_background_gifts");
+  } else {
+    options.set_option_string("ton_wallet_card_background_gifts", implode(wallet_card_background_gifts, '\xFF'));
+  }
+
   options.set_option_string("emoji_sounds", implode(emoji_sounds, ','));
 
   if (animated_emoji_zoom <= 0 || animated_emoji_zoom > 2.0) {
@@ -2115,6 +2169,7 @@ void ConfigManager::process_app_config(tl_object_ptr<telegram_api::JSONValue> &c
   } else {
     options.set_option_string("animation_search_emojis", animation_search_emojis);
   }
+  options.set_option_integer("ton_wallet_gasless_transfer_daily_count_max", wallet_gasless_daily_transfers);
 
   options.set_option_boolean("can_accept_calls", can_accept_calls);
 

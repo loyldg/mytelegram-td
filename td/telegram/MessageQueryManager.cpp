@@ -26,6 +26,7 @@
 #include "td/telegram/Global.h"
 #include "td/telegram/HashtagHints.h"
 #include "td/telegram/InlineQueriesManager.h"
+#include "td/telegram/InputMedia.h"
 #include "td/telegram/InputMessageText.h"
 #include "td/telegram/logevent/LogEvent.h"
 #include "td/telegram/logevent/LogEventHelper.h"
@@ -445,7 +446,7 @@ class EditMessageFactCheckQuery final : public Td::ResultHandler {
     CHECK(input_peer != nullptr);
     CHECK(message_id.is_server());
     auto server_message_id = message_id.get_server_message_id().get();
-    if (text.text.empty()) {
+    if (text.is_empty()) {
       send_query(G()->net_query_creator().create(
           telegram_api::messages_deleteFactCheck(std::move(input_peer), server_message_id)));
     } else {
@@ -577,7 +578,6 @@ class SearchMessagesGlobalQuery final : public Td::ResultHandler {
           if (community == nullptr) {
             return on_error(Status::Error(400, "Invalid community specified"));
           }
-          flags |= telegram_api::messages_searchGlobal::COMMUNITY_MASK;
           break;
         }
         default:
@@ -912,14 +912,11 @@ class GetMessagePositionQuery final : public Td::ResultHandler {
     auto top_msg_id = message_topic.get_input_top_msg_id();
     if (filter == MessageSearchFilter::Empty && top_msg_id == 0) {
       if (saved_input_peer != nullptr) {
-        int32 flags = 0;
-        if (message_topic_.is_monoforum()) {
-          flags |= telegram_api::messages_getSavedHistory::PARENT_PEER_MASK;
-        } else {
+        if (!message_topic_.is_monoforum()) {
           input_peer = nullptr;
         }
         send_query(G()->net_query_creator().create(
-            telegram_api::messages_getSavedHistory(flags, std::move(input_peer), std::move(saved_input_peer),
+            telegram_api::messages_getSavedHistory(0, std::move(input_peer), std::move(saved_input_peer),
                                                    message_id.get_server_message_id().get(), 0, -1, 1, 0, 0, 0)));
       } else {
         send_query(G()->net_query_creator().create(telegram_api::messages_getHistory(
@@ -927,9 +924,6 @@ class GetMessagePositionQuery final : public Td::ResultHandler {
       }
     } else {
       int32 flags = 0;
-      if (saved_input_peer != nullptr) {
-        flags |= telegram_api::messages_search::SAVED_PEER_ID_MASK;
-      }
       if (top_msg_id != 0) {
         flags |= telegram_api::messages_search::TOP_MSG_ID_MASK;
       }
@@ -1453,7 +1447,7 @@ class EditEphemeralMessageQuery final : public Td::ResultHandler {
             const FormattedText *text, bool disable_web_page_preview, MessageContentUploadId upload_id,
             InputMedia &&input_media, bool invert_media, const unique_ptr<ReplyMarkup> &reply_markup) {
     upload_id_ = upload_id;
-    int32 flags = telegram_api::ephemeral_editMessage::PEER_MASK;
+    int32 flags = 0;
     auto input_peer = td_->dialog_manager_->get_input_peer(dialog_id, AccessRights::Write);
     if (input_peer == nullptr) {
       return on_error(Status::Error(400, "Can't access the chat"));
@@ -1463,23 +1457,11 @@ class EditEphemeralMessageQuery final : public Td::ResultHandler {
       return on_error(Status::Error(400, "Can't access the user"));
     }
     auto input_reply_markup = get_input_reply_markup(td_->user_manager_.get(), reply_markup);
-    if (input_reply_markup != nullptr) {
-      flags |= telegram_api::ephemeral_editMessage::REPLY_MARKUP_MASK;
-    }
     vector<telegram_api::object_ptr<telegram_api::MessageEntity>> entities;
-    if (force_edit_text || (text != nullptr && !text->text.empty())) {
+    if (force_edit_text || (text != nullptr && !text->is_empty())) {
       flags |= telegram_api::ephemeral_editMessage::MESSAGE_MASK;
 
       entities = get_input_message_entities(td_->user_manager_.get(), text, "EditEphemeralMessageQuery");
-      if (!entities.empty()) {
-        flags |= telegram_api::ephemeral_editMessage::ENTITIES_MASK;
-      }
-    }
-    if (input_media.media_ != nullptr) {
-      flags |= telegram_api::ephemeral_editMessage::MEDIA_MASK;
-    }
-    if (input_media.rich_message_ != nullptr) {
-      flags |= telegram_api::ephemeral_editMessage::RICH_MESSAGE_MASK;
     }
     if (upload_id != MessageContentUploadId()) {
       td_->message_query_manager_->on_start_sending_message_content(upload_id_, input_media);
@@ -1520,29 +1502,18 @@ class EditCallbackQueryMessageQuery final : public Td::ResultHandler {
   MessageContentUploadId upload_id_;
 
  public:
-  void send(int64 callback_query_id, bool noforwards, const FormattedText *text, bool disable_web_page_preview,
-            MessageContentUploadId upload_id, InputMedia &&input_media, bool invert_media,
-            const unique_ptr<ReplyMarkup> &reply_markup) {
+  void send(int64 callback_query_id, bool anchor, bool noforwards, const FormattedText *text,
+            bool disable_web_page_preview, MessageContentUploadId upload_id, InputMedia &&input_media,
+            bool invert_media, const unique_ptr<ReplyMarkup> &reply_markup) {
     upload_id_ = upload_id;
     int32 flags = telegram_api::ephemeral_sendMessage::QUERY_ID_MASK;
     auto entities = get_input_message_entities(td_->user_manager_.get(), text, "SendMediaQuery");
-    if (!entities.empty()) {
-      flags |= telegram_api::ephemeral_sendMessage::ENTITIES_MASK;
-    }
-    if (input_media.rich_message_ != nullptr) {
-      flags |= telegram_api::ephemeral_sendMessage::RICH_MESSAGE_MASK;
-    }
-    if (input_media.media_ != nullptr) {
-      flags |= telegram_api::ephemeral_sendMessage::MEDIA_MASK;
-    }
     auto input_reply_markup = get_input_reply_markup(td_->user_manager_.get(), reply_markup);
-    if (input_reply_markup != nullptr) {
-      flags |= telegram_api::ephemeral_sendMessage::REPLY_MARKUP_MASK;
-    }
     td_->message_query_manager_->on_start_sending_message_content(upload_id_, input_media);
     send_query(G()->net_query_creator().create(telegram_api::ephemeral_sendMessage(
-        flags, invert_media, false, true, noforwards, nullptr, telegram_api::make_object<telegram_api::inputUserSelf>(),
-        callback_query_id, text == nullptr ? string() : text->text, std::move(entities), std::move(input_media.media_),
+        flags, invert_media, false, anchor, noforwards, nullptr,
+        telegram_api::make_object<telegram_api::inputUserSelf>(), callback_query_id,
+        text == nullptr ? string() : text->text, std::move(entities), std::move(input_media.media_),
         std::move(input_reply_markup), std::move(input_media.rich_message_), Random::secure_int64(), nullptr)));
   }
 
@@ -1904,9 +1875,8 @@ class DeleteEphemeralMessageQuery final : public Td::ResultHandler {
     if (r_input_user.is_error()) {
       return on_error(Status::Error(400, "Can't access the user"));
     }
-    int32 flags = telegram_api::ephemeral_deleteMessage::PEER_MASK;
     send_query(G()->net_query_creator().create(telegram_api::ephemeral_deleteMessage(
-        flags, std::move(input_peer), r_input_user.move_as_ok(), ephemeral_message_id.get())));
+        0, std::move(input_peer), r_input_user.move_as_ok(), ephemeral_message_id.get())));
   }
 
   void on_result(BufferSlice packet) final {
@@ -2142,7 +2112,6 @@ class ReadReactionsQuery final : public Td::ResultHandler {
     }
     telegram_api::object_ptr<telegram_api::InputPeer> saved_input_peer;
     if (saved_messages_topic_id.is_valid()) {
-      flags |= telegram_api::messages_readReactions::SAVED_PEER_ID_MASK;
       saved_input_peer = saved_messages_topic_id.get_input_peer(td_);
       CHECK(saved_input_peer != nullptr);
     }
@@ -2313,7 +2282,6 @@ class UnpinAllMessagesQuery final : public Td::ResultHandler {
     }
     telegram_api::object_ptr<telegram_api::InputPeer> saved_input_peer;
     if (saved_messages_topic_id.is_valid()) {
-      flags |= telegram_api::messages_unpinAllMessages::SAVED_PEER_ID_MASK;
       saved_input_peer = saved_messages_topic_id.get_input_peer(td_);
       CHECK(saved_input_peer != nullptr);
     }
@@ -2396,7 +2364,7 @@ class MessageQueryManager::UploadEphemeralMessageContentCallback final
     if (query.is_send_) {
       const FormattedText *text = get_message_content_text(query.content_.get());
       manager_->td_->create_handler<EditCallbackQueryMessageQuery>()->send(
-          query.callback_query_id_, query.noforwards_, text, query.disable_web_page_preview_, upload_id,
+          query.callback_query_id_, query.anchor_, query.noforwards_, text, query.disable_web_page_preview_, upload_id,
           std::move(input_media), query.invert_media_, query.reply_markup_);
     } else {
       const FormattedText *caption = get_message_content_caption(query.content_.get());
@@ -4202,10 +4170,8 @@ void MessageQueryManager::edit_ephemeral_message_caption(DialogId dialog_id, Use
 }
 
 void MessageQueryManager::edit_callback_query_message(
-    int64 callback_query_id, bool noforwards, td_api::object_ptr<td_api::ReplyMarkup> &&reply_markup,
+    int64 callback_query_id, bool anchor, bool noforwards, td_api::object_ptr<td_api::ReplyMarkup> &&reply_markup,
     td_api::object_ptr<td_api::InputMessageContent> &&input_message_content, Promise<Unit> &&promise) {
-  return promise.set_error(500, "Unsupported");
-
   auto is_bot = td_->auth_manager_->is_bot();
   CHECK(is_bot);
 
@@ -4226,6 +4192,7 @@ void MessageQueryManager::edit_callback_query_message(
                                                        upload_ephemeral_message_content_callback_);
   auto &query = edit_ephemeral_message_queries_[upload_id];
   query.is_send_ = true;
+  query.anchor_ = anchor;
   query.noforwards_ = noforwards;
   query.disable_web_page_preview_ = content.disable_web_page_preview;
   query.callback_query_id_ = callback_query_id;
@@ -4799,7 +4766,7 @@ void MessageQueryManager::delete_reactions_by_sender(DialogId dialog_id, DialogI
     return promise.set_error(400, "Reaction sender not found");
   }
 
-  // td_->messages_manager_->delete_local_reactions_by_sender(dialog_id, sender_dialog_id);
+  td_->messages_manager_->delete_local_reactions_by_sender(dialog_id, sender_dialog_id);
 
   td_->create_handler<DeleteParticipantReactionsQuery>(std::move(promise))->send(dialog_id, sender_dialog_id);
 }
@@ -4815,7 +4782,7 @@ void MessageQueryManager::delete_reaction_by_sender(DialogId dialog_id, MessageI
     return promise.set_error(400, "Invalid message identifier specified");
   }
 
-  // td_->messages_manager_->delete_reaction_by_sender(dialog_id, message_id, sender_dialog_id);
+  td_->messages_manager_->delete_reaction_by_sender(dialog_id, message_id, sender_dialog_id);
 
   td_->create_handler<DeleteParticipantReactionQuery>(std::move(promise))
       ->send(dialog_id, message_id, sender_dialog_id);
