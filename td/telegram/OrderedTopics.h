@@ -9,7 +9,6 @@
 #include "td/utils/algorithm.h"
 #include "td/utils/common.h"
 
-#include <algorithm>
 #include <limits>
 #include <set>
 
@@ -157,10 +156,9 @@ class OrderedTopics {
                                 vector<TopicIdT> &removed_topic_ids) const {
     removed_topic_ids = pinned_topic_ids_;
     auto old_topic_ids = pinned_topic_ids_;
-    std::reverse(old_topic_ids.begin(), old_topic_ids.end());
-    std::reverse(topic_ids.begin(), topic_ids.end());
+    td::reverse(old_topic_ids);
     auto old_it = old_topic_ids.begin();
-    for (auto topic_id : topic_ids) {
+    for (auto topic_id : reversed(topic_ids)) {
       td::remove(removed_topic_ids, topic_id);
       while (old_it < old_topic_ids.end()) {
         if (*old_it == topic_id) {
