@@ -14,6 +14,8 @@
 #include "td/telegram/ChatId.h"
 #include "td/telegram/ChatManager.h"
 #include "td/telegram/ChatReactions.h"
+#include "td/telegram/CommunityId.h"
+#include "td/telegram/CommunityManager.h"
 #include "td/telegram/Dependencies.h"
 #include "td/telegram/FileReferenceManager.h"
 #include "td/telegram/files/FileManager.h"
@@ -91,10 +93,11 @@ class CheckChannelUsernameQuery final : public Td::ResultHandler {
   explicit CheckChannelUsernameQuery(Promise<bool> &&promise) : promise_(std::move(promise)) {
   }
 
-  void send(ChannelId channel_id, const string &username, bool is_bot) {
+  void send(ChannelId channel_id, const string &username, bool is_bot, bool is_additional) {
     if (is_bot) {
       CHECK(channel_id == ChannelId());
-      send_query(G()->net_query_creator().create(telegram_api::bots_checkUsername(username), {{"me"}}));
+      send_query(
+          G()->net_query_creator().create(telegram_api::bots_checkUsername(0, is_additional, username), {{"me"}}));
       return;
     }
     channel_id_ = channel_id;
@@ -304,7 +307,9 @@ class EditDialogPhotoQuery final : public Td::ResultHandler {
         break;
       case DialogType::Channel: {
         auto channel_id = dialog_id.get_channel_id();
-        auto input_channel = td_->chat_manager_->get_input_channel(channel_id);
+        auto input_channel = channel_id.is_regular_channel()
+                                 ? td_->chat_manager_->get_input_channel(channel_id)
+                                 : td_->community_manager_->get_input_community(CommunityId(channel_id.get()));
         CHECK(input_channel != nullptr);
         send_query(G()->net_query_creator().create(
             telegram_api::channels_editPhoto(std::move(input_channel), std::move(input_chat_photo)), {{dialog_id_}}));
@@ -1106,7 +1111,6 @@ class ToggleDialogUnreadMarkQuery final : public Td::ResultHandler {
     saved_messages_topic_id_ = saved_messages_topic_id;
     is_marked_as_unread_ = is_marked_as_unread;
 
-    int32 flags = 0;
     telegram_api::object_ptr<telegram_api::InputPeer> parent_input_peer;
     telegram_api::object_ptr<telegram_api::InputDialogPeer> input_peer;
     if (saved_messages_topic_id.is_valid()) {
@@ -1114,7 +1118,6 @@ class ToggleDialogUnreadMarkQuery final : public Td::ResultHandler {
       if (parent_input_peer == nullptr) {
         return on_error(Status::Error(400, "Can't access the chat"));
       }
-      flags |= telegram_api::messages_markDialogUnread::PARENT_PEER_MASK;
       input_peer = saved_messages_topic_id.get_input_dialog_peer(td_);
       if (input_peer == nullptr) {
         return on_error(Status::Error(400, "Can't access the topic"));
@@ -1127,7 +1130,7 @@ class ToggleDialogUnreadMarkQuery final : public Td::ResultHandler {
     }
 
     send_query(G()->net_query_creator().create(
-        telegram_api::messages_markDialogUnread(flags, is_marked_as_unread, std::move(parent_input_peer),
+        telegram_api::messages_markDialogUnread(0, is_marked_as_unread, std::move(parent_input_peer),
                                                 std::move(input_peer)),
         {{dialog_id}}));
   }
@@ -2016,8 +2019,13 @@ bool DialogManager::on_get_dialog_error(DialogId dialog_id, const Status &status
     case DialogType::SecretChat:
       // to be implemented if necessary
       break;
-    case DialogType::Channel:
-      return td_->chat_manager_->on_get_channel_error(dialog_id.get_channel_id(), status, source);
+    case DialogType::Channel: {
+      auto channel_id = dialog_id.get_channel_id();
+      if (channel_id.is_regular_channel()) {
+        return td_->chat_manager_->on_get_channel_error(dialog_id.get_channel_id(), status, source);
+      }
+      break;
+    }
     case DialogType::None:
       // to be implemented if necessary
       break;
@@ -2401,9 +2409,13 @@ void DialogManager::set_dialog_photo(DialogId dialog_id, const td_api::object_pt
       break;
     }
     case DialogType::Channel: {
-      auto status = td_->chat_manager_->get_channel_permissions(dialog_id.get_channel_id());
+      auto channel_id = dialog_id.get_channel_id();
+      auto status = td_->chat_manager_->get_channel_permissions(channel_id);
       if (!status.can_change_info_and_settings()) {
         return promise.set_error(400, "Not enough rights to change chat photo");
+      }
+      if (!channel_id.is_regular_channel()) {
+        return promise.set_error(400, "Can't change chat photo");
       }
       break;
     }
@@ -2414,6 +2426,12 @@ void DialogManager::set_dialog_photo(DialogId dialog_id, const td_api::object_pt
       UNREACHABLE();
   }
 
+  do_set_dialog_photo(dialog_id, dialog_id, input_photo, std::move(promise));
+}
+
+void DialogManager::do_set_dialog_photo(DialogId dialog_id, DialogId owner_dialog_id,
+                                        const td_api::object_ptr<td_api::InputChatPhoto> &input_photo,
+                                        Promise<Unit> &&promise) {
   const td_api::object_ptr<td_api::InputFile> *input_file = nullptr;
   double main_frame_timestamp = 0.0;
   bool is_animation = false;
@@ -2452,9 +2470,8 @@ void DialogManager::set_dialog_photo(DialogId dialog_id, const td_api::object_pt
         auto photo = static_cast<const td_api::inputChatPhotoSticker *>(input_photo.get());
         TRY_RESULT_PROMISE(promise, sticker_photo_size, StickerPhotoSize::get_sticker_photo_size(td_, photo->sticker_));
 
-        int32 flags = telegram_api::inputChatUploadedPhoto::VIDEO_EMOJI_MARKUP_MASK;
         auto input_chat_photo = telegram_api::make_object<telegram_api::inputChatUploadedPhoto>(
-            flags, nullptr, nullptr, 0.0, sticker_photo_size->get_input_video_size_object(td_));
+            0, nullptr, nullptr, 0.0, sticker_photo_size->get_input_video_size_object(td_));
         return send_edit_dialog_photo_query(dialog_id, FileUploadId(), std::move(input_chat_photo), std::move(promise));
       }
       default:
@@ -2474,9 +2491,9 @@ void DialogManager::set_dialog_photo(DialogId dialog_id, const td_api::object_pt
   }
 
   auto file_type = is_animation ? FileType::Animation : FileType::Photo;
-  TRY_RESULT_PROMISE(
-      promise, file_id,
-      td_->file_manager_->get_input_file_id(file_type, *input_file, dialog_id, true, false, false, false, false, true));
+  TRY_RESULT_PROMISE(promise, file_id,
+                     td_->file_manager_->get_input_file_id(file_type, *input_file, owner_dialog_id, true, false, false,
+                                                           false, false, true));
   if (!file_id.is_valid()) {
     send_edit_dialog_photo_query(dialog_id, FileUploadId(),
                                  telegram_api::make_object<telegram_api::inputChatPhotoEmpty>(), std::move(promise));
@@ -2559,14 +2576,12 @@ void DialogManager::on_upload_dialog_photo(FileUploadId file_upload_id,
   telegram_api::object_ptr<telegram_api::InputFile> photo_input_file;
   telegram_api::object_ptr<telegram_api::InputFile> video_input_file;
   if (is_animation) {
-    flags |= telegram_api::inputChatUploadedPhoto::VIDEO_MASK;
     video_input_file = std::move(input_file);
 
     if (main_frame_timestamp != 0.0) {
       flags |= telegram_api::inputChatUploadedPhoto::VIDEO_START_TS_MASK;
     }
   } else {
-    flags |= telegram_api::inputChatUploadedPhoto::FILE_MASK;
     photo_input_file = std::move(input_file);
   }
 
@@ -3025,7 +3040,7 @@ void DialogManager::on_dialog_usernames_received(DialogId dialog_id, const Usern
   }
 }
 
-void DialogManager::check_dialog_username(DialogId dialog_id, const string &username, bool is_bot,
+void DialogManager::check_dialog_username(DialogId dialog_id, const string &username, bool is_bot, bool is_additional,
                                           Promise<CheckDialogUsernameResult> &&promise) {
   if (dialog_id != DialogId() && dialog_id.get_type() != DialogType::User &&
       !have_dialog_force(dialog_id, "check_dialog_username")) {
@@ -3063,7 +3078,8 @@ void DialogManager::check_dialog_username(DialogId dialog_id, const string &user
   }
 
   if (username.empty()) {
-    return promise.set_value(is_bot ? CheckDialogUsernameResult::Invalid : CheckDialogUsernameResult::Ok);
+    return promise.set_value(is_bot && !is_additional ? CheckDialogUsernameResult::Invalid
+                                                      : CheckDialogUsernameResult::Ok);
   }
 
   if (!is_allowed_username(username) && username.size() != 4) {
@@ -3099,10 +3115,10 @@ void DialogManager::check_dialog_username(DialogId dialog_id, const string &user
       return td_->create_handler<CheckUsernameQuery>(std::move(request_promise))->send(username);
     case DialogType::Channel:
       return td_->create_handler<CheckChannelUsernameQuery>(std::move(request_promise))
-          ->send(dialog_id.get_channel_id(), username, is_bot);
+          ->send(dialog_id.get_channel_id(), username, is_bot, is_additional);
     case DialogType::None:
       return td_->create_handler<CheckChannelUsernameQuery>(std::move(request_promise))
-          ->send(ChannelId(), username, is_bot);
+          ->send(ChannelId(), username, is_bot, is_additional);
     case DialogType::Chat:
     case DialogType::SecretChat:
     default:
@@ -3393,10 +3409,10 @@ vector<DialogId> DialogManager::search_public_dialogs(
   }
 
   auto type_num = static_cast<int32>(type_filter);
-  auto it = found_public_dialogs_[type_num].find(query);
-  if (it != found_public_dialogs_[type_num].end()) {
+  auto *dialog_ids = found_public_dialogs_[type_num].get(query);
+  if (dialog_ids != nullptr) {
     promise.set_value(Unit());
-    return it->second;
+    return *dialog_ids;
   }
 
   send_search_public_dialogs_query(query, type_filter, std::move(promise));
@@ -3423,10 +3439,10 @@ vector<DialogId> DialogManager::search_dialogs_on_server(
   }
 
   auto type_num = static_cast<int32>(type_filter);
-  auto it = found_on_server_dialogs_[type_num].find(query);
-  if (it != found_on_server_dialogs_[type_num].end()) {
+  auto *dialog_ids = found_on_server_dialogs_[type_num].get(query);
+  if (dialog_ids != nullptr) {
     promise.set_value(Unit());
-    return td_->messages_manager_->sort_dialogs_by_order(it->second, limit);
+    return td_->messages_manager_->sort_dialogs_by_order(*dialog_ids, limit);
   }
 
   send_search_public_dialogs_query(query, type_filter, std::move(promise));

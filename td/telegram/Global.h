@@ -90,6 +90,7 @@ class TdDb;
 class TempAuthKeyWatchdog;
 class ThemeManager;
 class TimeZoneManager;
+class TonWalletManager;
 class TopDialogManager;
 class TranscriptionManager;
 class TranslationManager;
@@ -98,6 +99,7 @@ class UserManager;
 class WebAppManager;
 class WebBrowserManager;
 class WebPagesManager;
+class WebProxyManager;
 class WelcomeMessageManager;
 
 class Global final : public ActorContext {
@@ -574,6 +576,13 @@ class Global final : public ActorContext {
     time_zone_manager_ = time_zone_manager;
   }
 
+  ActorId<TonWalletManager> ton_wallet_manager() const {
+    return ton_wallet_manager_;
+  }
+  void set_ton_wallet_manager(ActorId<TonWalletManager> ton_wallet_manager) {
+    ton_wallet_manager_ = ton_wallet_manager;
+  }
+
   ActorId<TopDialogManager> top_dialog_manager() const {
     return top_dialog_manager_;
   }
@@ -628,6 +637,13 @@ class Global final : public ActorContext {
   }
   void set_web_pages_manager(ActorId<WebPagesManager> web_pages_manager) {
     web_pages_manager_ = web_pages_manager;
+  }
+
+  ActorId<WebProxyManager> web_proxy_manager() const {
+    return web_proxy_manager_;
+  }
+  void set_web_proxy_manager(ActorId<WebProxyManager> web_proxy_manager) {
+    web_proxy_manager_ = web_proxy_manager;
   }
 
   ActorId<WelcomeMessageManager> welcome_message_manager() const {
@@ -818,6 +834,7 @@ class Global final : public ActorContext {
   ActorId<SuggestedActionManager> suggested_action_manager_;
   ActorId<ThemeManager> theme_manager_;
   ActorId<TimeZoneManager> time_zone_manager_;
+  ActorId<TonWalletManager> ton_wallet_manager_;
   ActorId<TopDialogManager> top_dialog_manager_;
   ActorId<TranscriptionManager> transcription_manager_;
   ActorId<TranslationManager> translation_manager_;
@@ -826,6 +843,7 @@ class Global final : public ActorContext {
   ActorId<WebAppManager> web_app_manager_;
   ActorId<WebBrowserManager> web_browser_manager_;
   ActorId<WebPagesManager> web_pages_manager_;
+  ActorId<WebProxyManager> web_proxy_manager_;
   ActorId<WelcomeMessageManager> welcome_message_manager_;
   ActorOwn<ConnectionCreator> connection_creator_;
   ActorOwn<TempAuthKeyWatchdog> temp_auth_key_watchdog_;

@@ -56,6 +56,7 @@
 #include "td/telegram/InputGroupCallId.h"
 #include "td/telegram/InputInvoice.h"
 #include "td/telegram/InputInvoice.hpp"
+#include "td/telegram/InputMedia.h"
 #include "td/telegram/InputMessageText.h"
 #include "td/telegram/Location.h"
 #include "td/telegram/MessageEntity.h"
@@ -79,6 +80,7 @@
 #include "td/telegram/PollManager.h"
 #include "td/telegram/PollOption.h"
 #include "td/telegram/RepliedMessageInfo.h"
+#include "td/telegram/ReplyMarkup.h"
 #include "td/telegram/RichMessage.h"
 #include "td/telegram/RichMessage.hpp"
 #include "td/telegram/secret_api.hpp"
@@ -551,7 +553,7 @@ class MessageChatSetTtl final : public MessageContent {
 
 class MessageUnsupported final : public MessageContent {
  public:
-  static constexpr int32 CURRENT_VERSION = 62;
+  static constexpr int32 CURRENT_VERSION = 64;
   int32 version = CURRENT_VERSION;
 
   MessageUnsupported() = default;
@@ -1827,6 +1829,63 @@ class MessageChatJoinedViaCommunity final : public MessageContent {
   }
 };
 
+class MessageGramTransfer final : public MessageContent {
+ public:
+  int64 amount = 0;
+  string peer_address;
+  string transaction_id;
+  string comment;
+  bool is_comment_encrypted = false;
+
+  MessageGramTransfer() = default;
+  MessageGramTransfer(int64 amount, string peer_address, string transaction_id, string comment,
+                      bool is_comment_encrypted)
+      : amount(amount)
+      , peer_address(std::move(peer_address))
+      , transaction_id(std::move(transaction_id))
+      , comment(std::move(comment))
+      , is_comment_encrypted(is_comment_encrypted) {
+  }
+
+  MessageContentType get_type() const final {
+    return MessageContentType::GramTransfer;
+  }
+};
+
+class MessageWalletTonConnectRequest final : public MessageContent {
+ public:
+  int64 session_id = 0;
+  int32 expire_date = 0;
+  string topic;
+  string trace_id;
+  string dapp_name;
+  bool is_accepted = false;
+  bool is_declined = false;
+
+  MessageWalletTonConnectRequest() = default;
+  MessageWalletTonConnectRequest(int64 session_id, int32 expire_date, string topic, string trace_id, string dapp_name,
+                                 bool is_accepted, bool is_declined)
+      : session_id(session_id)
+      , expire_date(expire_date)
+      , topic(std::move(topic))
+      , trace_id(std::move(trace_id))
+      , dapp_name(std::move(dapp_name))
+      , is_accepted(is_accepted)
+      , is_declined(is_declined) {
+  }
+
+  MessageContentType get_type() const final {
+    return MessageContentType::WalletTonConnectRequest;
+  }
+};
+
+class MessageUnpaidMessagesAllowedByLink final : public MessageContent {
+ public:
+  MessageContentType get_type() const final {
+    return MessageContentType::UnpaidMessagesAllowedByLink;
+  }
+};
+
 template <class StorerT>
 static void store(const MessageContent *content, StorerT &storer) {
   CHECK(content != nullptr);
@@ -2179,7 +2238,7 @@ static void store(const MessageContent *content, StorerT &storer) {
     }
     case MessageContentType::Poll: {
       const auto *m = static_cast<const MessagePoll *>(content);
-      auto has_caption = !m->caption.text.empty();
+      auto has_caption = !m->caption.is_empty();
       bool has_attached_media = m->attached_media != nullptr;
       BEGIN_STORE_FLAGS();
       STORE_FLAG(has_caption);
@@ -2272,7 +2331,7 @@ static void store(const MessageContent *content, StorerT &storer) {
     case MessageContentType::GiftPremium: {
       const auto *m = static_cast<const MessageGiftPremium *>(content);
       bool has_crypto_amount = !m->crypto_currency.empty();
-      bool has_text = !m->text.text.empty();
+      bool has_text = !m->text.is_empty();
       bool has_days = true;
       BEGIN_STORE_FLAGS();
       STORE_FLAG(has_crypto_amount);
@@ -2361,7 +2420,7 @@ static void store(const MessageContent *content, StorerT &storer) {
       bool has_amount = m->amount > 0;
       bool has_crypto_currency = !m->crypto_currency.empty();
       bool has_crypto_amount = m->crypto_amount > 0;
-      bool has_text = !m->text.text.empty();
+      bool has_text = !m->text.is_empty();
       bool has_days = true;
       BEGIN_STORE_FLAGS();
       STORE_FLAG(m->via_giveaway);
@@ -2522,7 +2581,7 @@ static void store(const MessageContent *content, StorerT &storer) {
     }
     case MessageContentType::PaidMedia: {
       const auto *m = static_cast<const MessagePaidMedia *>(content);
-      bool has_caption = !m->caption.text.empty();
+      bool has_caption = !m->caption.is_empty();
       bool has_payload = !m->payload.empty();
       BEGIN_STORE_FLAGS();
       STORE_FLAG(has_caption);
@@ -2587,7 +2646,7 @@ static void store(const MessageContent *content, StorerT &storer) {
     }
     case MessageContentType::StarGift: {
       const auto *m = static_cast<const MessageStarGift *>(content);
-      bool has_text = !m->text.text.empty();
+      bool has_text = !m->text.is_empty();
       bool has_upgrade_star_count = m->upgrade_star_count != 0;
       bool has_upgrade_message_id = m->upgrade_message_id.is_valid();
       bool has_owner_dialog_id = m->owner_dialog_id.is_valid();
@@ -2665,7 +2724,7 @@ static void store(const MessageContent *content, StorerT &storer) {
       bool has_resale_price = !m->resale_price.is_empty();
       bool has_drop_original_details_star_count = m->drop_original_details_star_count != 0;
       bool has_can_craft_at = m->can_craft_at != 0;
-      bool has_text = !m->text.text.empty();
+      bool has_text = !m->text.is_empty();
       BEGIN_STORE_FLAGS();
       STORE_FLAG(has_transfer_star_count);
       STORE_FLAG(has_can_export_at);
@@ -3012,6 +3071,50 @@ static void store(const MessageContent *content, StorerT &storer) {
       store(m->community_id, storer);
       break;
     }
+    case MessageContentType::GramTransfer: {
+      const auto *m = static_cast<const MessageGramTransfer *>(content);
+      bool has_comment = !m->comment.empty();
+      BEGIN_STORE_FLAGS();
+      STORE_FLAG(has_comment);
+      STORE_FLAG(m->is_comment_encrypted);
+      END_STORE_FLAGS();
+      store(m->amount, storer);
+      store(m->peer_address, storer);
+      store(m->transaction_id, storer);
+      if (has_comment) {
+        store(m->comment, storer);
+      }
+      break;
+    }
+    case MessageContentType::WalletTonConnectRequest: {
+      const auto *m = static_cast<const MessageWalletTonConnectRequest *>(content);
+      bool has_topic = !m->topic.empty();
+      bool has_trace_id = !m->trace_id.empty();
+      bool has_dapp_name = !m->dapp_name.empty();
+      BEGIN_STORE_FLAGS();
+      STORE_FLAG(has_topic);
+      STORE_FLAG(has_trace_id);
+      STORE_FLAG(m->is_accepted);
+      STORE_FLAG(m->is_declined);
+      STORE_FLAG(has_dapp_name);
+      END_STORE_FLAGS();
+      store(m->session_id, storer);
+      store(m->expire_date, storer);
+      if (has_topic) {
+        store(m->topic, storer);
+      }
+      if (has_trace_id) {
+        store(m->trace_id, storer);
+      }
+      if (has_dapp_name) {
+        store(m->dapp_name, storer);
+      }
+      break;
+    }
+    case MessageContentType::UnpaidMessagesAllowedByLink:
+      BEGIN_STORE_FLAGS();
+      END_STORE_FLAGS();
+      break;
     default:
       UNREACHABLE();
   }
@@ -4486,6 +4589,55 @@ static void parse(unique_ptr<MessageContent> &content, ParserT &parser) {
       content = std::move(m);
       break;
     }
+    case MessageContentType::GramTransfer: {
+      auto m = make_unique<MessageGramTransfer>();
+      bool has_comment;
+      BEGIN_PARSE_FLAGS();
+      PARSE_FLAG(has_comment);
+      PARSE_FLAG(m->is_comment_encrypted);
+      END_PARSE_FLAGS();
+      parse(m->amount, parser);
+      parse(m->peer_address, parser);
+      parse(m->transaction_id, parser);
+      if (has_comment) {
+        parse(m->comment, parser);
+      }
+      content = std::move(m);
+      break;
+    }
+    case MessageContentType::WalletTonConnectRequest: {
+      auto m = make_unique<MessageWalletTonConnectRequest>();
+      bool has_topic;
+      bool has_trace_id;
+      bool has_dapp_name;
+      BEGIN_PARSE_FLAGS();
+      PARSE_FLAG(has_topic);
+      PARSE_FLAG(has_trace_id);
+      PARSE_FLAG(m->is_accepted);
+      PARSE_FLAG(m->is_declined);
+      PARSE_FLAG(has_dapp_name);
+      END_PARSE_FLAGS();
+      parse(m->session_id, parser);
+      parse(m->expire_date, parser);
+      if (has_topic) {
+        parse(m->topic, parser);
+      }
+      if (has_trace_id) {
+        parse(m->trace_id, parser);
+      }
+      if (has_dapp_name) {
+        parse(m->dapp_name, parser);
+      }
+      content = std::move(m);
+      break;
+    }
+    case MessageContentType::UnpaidMessagesAllowedByLink: {
+      auto m = make_unique<MessageUnpaidMessagesAllowedByLink>();
+      BEGIN_PARSE_FLAGS();
+      END_PARSE_FLAGS();
+      content = std::move(m);
+      break;
+    }
 
     default:
       is_bad = true;
@@ -4682,6 +4834,12 @@ unique_ptr<MessageContent> create_voice_note_message_content(FileId voice_note_f
 
 unique_ptr<MessageContent> create_contact_registered_message_content() {
   return make_unique<MessageContactRegistered>();
+}
+
+unique_ptr<MessageContent> create_gram_transfer_message_content(int64 amount, const string &peer_address,
+                                                                const string &transaction_id, const string &comment,
+                                                                bool is_comment_encrypted) {
+  return td::make_unique<MessageGramTransfer>(amount, peer_address, transaction_id, comment, is_comment_encrypted);
 }
 
 unique_ptr<MessageContent> create_screenshot_taken_message_content() {
@@ -5495,6 +5653,9 @@ bool can_message_content_have_input_media(const Td *td, const MessageContent *co
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return false;
     case MessageContentType::Animation:
     case MessageContentType::Audio:
@@ -5670,6 +5831,9 @@ SecretInputMedia get_message_content_secret_input_media(
     case MessageContentType::RichText:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       break;
     default:
       UNREACHABLE();
@@ -5906,6 +6070,9 @@ static InputMedia get_message_content_input_media_impl(
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       break;
     default:
       UNREACHABLE();
@@ -5919,11 +6086,7 @@ InputMedia get_message_content_multi_input_media(
   switch (content->get_type()) {
     case MessageContentType::PaidMedia: {
       const auto *m = static_cast<const MessagePaidMedia *>(content);
-      int32 flags = 0;
-      if (!m->payload.empty()) {
-        flags |= telegram_api::inputMediaPaidMedia::PAYLOAD_MASK;
-      }
-      return telegram_api::make_object<telegram_api::inputMediaPaidMedia>(flags, m->star_count, std::move(input_media),
+      return telegram_api::make_object<telegram_api::inputMediaPaidMedia>(0, m->star_count, std::move(input_media),
                                                                           m->payload);
     }
     case MessageContentType::Poll: {
@@ -6017,7 +6180,7 @@ telegram_api::object_ptr<telegram_api::InputMedia> get_message_content_input_med
   if (text->web_page_url.empty()) {
     return nullptr;
   }
-  bool is_optional = !text->text.text.empty();
+  bool is_optional = !text->text.is_empty();
   return telegram_api::make_object<telegram_api::inputMediaWebPage>(0, text->force_large_media, text->force_small_media,
                                                                     is_optional, text->web_page_url);
 }
@@ -6190,6 +6353,9 @@ void delete_message_content_thumbnail(Td *td, MessageContent *content, int32 med
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       break;
     default:
       UNREACHABLE();
@@ -6467,6 +6633,9 @@ Status can_send_message_content(DialogId dialog_id, const MessageContent *conten
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       UNREACHABLE();
   }
   return Status::OK();
@@ -6670,6 +6839,9 @@ static int32 get_message_content_media_index_mask(const MessageContent *content,
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return 0;
     default:
       UNREACHABLE();
@@ -6868,6 +7040,24 @@ std::pair<InputGroupCallId, bool> get_message_content_group_call_info(const Mess
   CHECK(content->get_type() == MessageContentType::GroupCall);
   const auto *m = static_cast<const MessageGroupCall *>(content);
   return {m->input_group_call_id, m->duration >= 0};
+}
+
+vector<CustomEmojiId> get_message_content_custom_emoji_ids(const MessageContent *content) {
+  vector<CustomEmojiId> custom_emoji_ids;
+  const auto *text = get_message_content_text(content);
+  if (text != nullptr) {
+    for (auto &entity : text->entities) {
+      if (entity.type == MessageEntity::Type::CustomEmoji) {
+        custom_emoji_ids.push_back(entity.custom_emoji_id);
+      }
+    }
+  } else {
+    const auto *rich_message = get_message_content_rich_message(content);
+    if (rich_message != nullptr) {
+      custom_emoji_ids = rich_message->get_custom_emoji_ids();
+    }
+  }
+  return custom_emoji_ids;
 }
 
 static vector<UserId> get_formatted_text_user_ids(const FormattedText *formatted_text) {
@@ -7140,6 +7330,11 @@ vector<UserId> get_message_content_min_user_ids(const Td *td, const MessageConte
     case MessageContentType::ChangeCommunity:
       break;
     case MessageContentType::ChatJoinedViaCommunity:
+      break;
+    case MessageContentType::GramTransfer:
+      break;
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       break;
     default:
       UNREACHABLE();
@@ -7758,6 +7953,9 @@ static void merge_message_contents(Td *td, const MessageContent *old_content, Me
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       break;
     default:
       UNREACHABLE();
@@ -7939,6 +8137,9 @@ bool merge_message_content_file_id(Td *td, MessageContent *message_content, File
     case MessageContentType::RichText:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       LOG(ERROR) << "Receive new file " << new_file_id << " in a sent message of the type " << content_type;
       break;
     default:
@@ -8789,6 +8990,28 @@ void compare_message_contents(Td *td, const MessageContent *old_content, const M
       }
       break;
     }
+    case MessageContentType::GramTransfer: {
+      const auto *lhs = static_cast<const MessageGramTransfer *>(old_content);
+      const auto *rhs = static_cast<const MessageGramTransfer *>(new_content);
+      if (lhs->amount != rhs->amount || lhs->peer_address != rhs->peer_address ||
+          lhs->transaction_id != rhs->transaction_id || lhs->comment != rhs->comment ||
+          lhs->is_comment_encrypted != rhs->is_comment_encrypted) {
+        need_update = true;
+      }
+      break;
+    }
+    case MessageContentType::WalletTonConnectRequest: {
+      const auto *lhs = static_cast<const MessageWalletTonConnectRequest *>(old_content);
+      const auto *rhs = static_cast<const MessageWalletTonConnectRequest *>(new_content);
+      if (lhs->session_id != rhs->session_id || lhs->expire_date != rhs->expire_date || lhs->topic != rhs->topic ||
+          lhs->trace_id != rhs->trace_id || lhs->dapp_name != rhs->dapp_name || lhs->is_accepted != rhs->is_accepted ||
+          lhs->is_declined != rhs->is_declined) {
+        need_update = true;
+      }
+      break;
+    }
+    case MessageContentType::UnpaidMessagesAllowedByLink:
+      break;
     default:
       UNREACHABLE();
       break;
@@ -9785,12 +10008,12 @@ unique_ptr<MessageContent> get_message_content(Td *td, FormattedText message,
   switch (media_ptr == nullptr ? telegram_api::messageMediaEmpty::ID : media_ptr->get_id()) {
     case telegram_api::messageMediaEmpty::ID:
       if (rich_message != nullptr) {
-        if (!message.text.empty()) {
+        if (!message.is_empty()) {
           LOG(ERROR) << "Receive both text and rich text in a message from " << owner_dialog_id;
         }
         return td::make_unique<MessageRichText>(RichMessage(td, std::move(rich_message), owner_dialog_id));
       }
-      if (message.text.empty()) {
+      if (message.is_empty()) {
         LOG(ERROR) << "Receive empty message text and media from " << source;
       }
       if (disable_web_page_preview != nullptr && !get_first_url(message).empty()) {
@@ -10432,6 +10655,9 @@ unique_ptr<MessageContent> dup_message_content(Td *td, DialogId dialog_id, const
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return nullptr;
     default:
       UNREACHABLE();
@@ -10474,6 +10700,7 @@ unique_ptr<MessageContent> get_action_message_content(Td *td, tl_object_ptr<tele
       case telegram_api::messageActionNewCreatorPending::ID:
       case telegram_api::messageActionChangeCreator::ID:
       case telegram_api::messageActionChatJoinedViaCommunity::ID:
+      case telegram_api::messageActionWalletTonConnectRequest::ID:
         LOG(ERROR) << "Receive business " << to_string(action_ptr);
         break;
       case telegram_api::messageActionHistoryClear::ID:
@@ -10510,6 +10737,8 @@ unique_ptr<MessageContent> get_action_message_content(Td *td, tl_object_ptr<tele
       case telegram_api::messageActionNoForwardsRequest::ID:
       case telegram_api::messageActionPollAppendAnswer::ID:
       case telegram_api::messageActionPollDeleteAnswer::ID:
+      case telegram_api::messageActionGramTransfer::ID:
+      case telegram_api::messageActionNoPaidMessagesTokenUsed::ID:
         // ok
         break;
       case telegram_api::messageActionBotAllowed::ID:
@@ -11320,6 +11549,27 @@ unique_ptr<MessageContent> get_action_message_content(Td *td, tl_object_ptr<tele
       }
       return td::make_unique<MessageChatJoinedViaCommunity>(community_id);
     }
+    case telegram_api::messageActionGramTransfer::ID: {
+      auto action = telegram_api::move_object_as<telegram_api::messageActionGramTransfer>(action_ptr);
+      if (action->amount_ <= 0) {
+        LOG(ERROR) << "Receive " << to_string(action);
+        action->amount_ = 0;
+      }
+      if (action->peer_address_.empty() || action->transaction_id_.empty()) {
+        LOG(ERROR) << "Receive " << to_string(action);
+      }
+      return td::make_unique<MessageGramTransfer>(action->amount_, std::move(action->peer_address_),
+                                                  std::move(action->transaction_id_), std::move(action->comment_),
+                                                  action->comment_encrypted_);
+    }
+    case telegram_api::messageActionWalletTonConnectRequest::ID: {
+      auto action = telegram_api::move_object_as<telegram_api::messageActionWalletTonConnectRequest>(action_ptr);
+      return td::make_unique<MessageWalletTonConnectRequest>(
+          action->session_id_, action->expires_, std::move(action->topic_), std::move(action->trace_id_),
+          std::move(action->dapp_name_), action->accepted_, action->declined_);
+    }
+    case telegram_api::messageActionNoPaidMessagesTokenUsed::ID:
+      return td::make_unique<MessageUnpaidMessagesAllowedByLink>();
     default:
       UNREACHABLE();
   }
@@ -11675,7 +11925,8 @@ td_api::object_ptr<td_api::MessageContent> get_message_content_object(
       auto month_count = get_premium_duration_month_count(m->days);
       return td_api::make_object<td_api::messageGiftedPremium>(
           gifter_user_id, receiver_user_id, get_text_object(m->text), m->currency, m->amount, m->crypto_currency,
-          m->crypto_amount, get_premium_duration_day_count(month_count) == m->days ? month_count : 0, m->days,
+          m->crypto_amount,
+          get_premium_duration_day_count(month_count) == m->days || m->days % 30 == 0 ? month_count : 0, m->days,
           td->stickers_manager_->get_premium_gift_sticker_object(month_count, 0));
     }
     case MessageContentType::TopicCreate: {
@@ -11741,7 +11992,8 @@ td_api::object_ptr<td_api::MessageContent> get_message_content_object(
               ? get_message_sender_object(td, m->creator_dialog_id, "messagePremiumGiftCode")
               : nullptr,
           get_text_object(m->text), m->via_giveaway, m->is_unclaimed, m->currency, m->amount, m->crypto_currency,
-          m->crypto_amount, get_premium_duration_day_count(month_count) == m->days ? month_count : 0, m->days,
+          m->crypto_amount,
+          get_premium_duration_day_count(month_count) == m->days || m->days % 30 == 0 ? month_count : 0, m->days,
           td->stickers_manager_->get_premium_gift_sticker_object(month_count, 0), m->code);
     }
     case MessageContentType::Giveaway: {
@@ -11870,14 +12122,22 @@ td_api::object_ptr<td_api::MessageContent> get_message_content_object(
       } else if (m->is_prepaid_upgrade && is_outgoing) {
         sender_dialog_id = DialogId();
       }
+      bool can_be_deleted = false;
+      if (star_gift_id.is_valid() && m->star_gift.can_be_deleted() && !m->was_converted && !m->was_upgraded &&
+          !m->was_refunded && m->convert_star_count == 0) {
+        auto owner_dialog_id = star_gift_id.get_dialog_id(td);
+        can_be_deleted = td->auth_manager_->is_bot() || owner_dialog_id == td->dialog_manager_->get_my_dialog_id() ||
+                         (owner_dialog_id.get_type() == DialogType::Channel &&
+                          td->chat_manager_->get_channel_status(owner_dialog_id.get_channel_id()).is_creator());
+      }
       return td_api::make_object<td_api::messageGift>(
           m->star_gift.get_gift_object(td),
           sender_dialog_id == DialogId() ? nullptr
                                          : get_message_sender_object(td, sender_dialog_id, "messageGift sender"),
           get_message_sender_object(td, receiver_dialog_id, "messageGift receiver"), star_gift_id.get_star_gift_id(),
           get_text_object(m->text), m->gift_num, m->convert_star_count, m->upgrade_star_count, m->is_upgrade_separate,
-          m->is_auction_acquired, m->name_hidden, m->is_saved, m->is_prepaid_upgrade, m->can_upgrade, m->was_converted,
-          m->was_upgraded, m->was_refunded,
+          m->is_auction_acquired, m->name_hidden, m->is_saved, m->is_prepaid_upgrade, m->can_upgrade, can_be_deleted,
+          m->was_converted, m->was_upgraded, m->was_refunded,
           StarGiftId(m->upgrade_message_id.get_server_message_id()).get_star_gift_id(), m->prepaid_upgrade_hash);
     }
     case MessageContentType::StarGiftUnique: {
@@ -12119,6 +12379,41 @@ td_api::object_ptr<td_api::MessageContent> get_message_content_object(
       return td_api::make_object<td_api::messageChatJoinFromCommunity>(
           td->community_manager_->get_community_id_object(m->community_id, "messageChatJoinFromCommunity"));
     }
+    case MessageContentType::GramTransfer: {
+      const auto *m = static_cast<const MessageGramTransfer *>(content);
+      UserId sender_user_id;
+      if (dialog_id.get_type() == DialogType::User) {
+        if (is_outgoing) {
+          sender_user_id = td->user_manager_->get_my_id();
+        } else {
+          auto user_id = dialog_id.get_user_id();
+          if (user_id != UserManager::get_service_notifications_user_id()) {
+            sender_user_id = user_id;
+          }
+        }
+      } else {
+        LOG(ERROR) << "Receive TON wallet transfer in " << message_id << " in " << dialog_id << " from " << source;
+      }
+      return td_api::make_object<td_api::messageTonWalletTransfer>(
+          td->user_manager_->get_user_id_object(sender_user_id, "messageTonWalletTransfer"), m->transaction_id,
+          m->peer_address, m->amount, m->comment, m->is_comment_encrypted);
+    }
+    case MessageContentType::WalletTonConnectRequest: {
+      const auto *m = static_cast<const MessageWalletTonConnectRequest *>(content);
+      auto state = [&]() -> td_api::object_ptr<td_api::TonConnectRequestState> {
+        if (m->is_accepted) {
+          return td_api::make_object<td_api::tonConnectRequestStateAccepted>();
+        }
+        if (m->is_declined) {
+          return td_api::make_object<td_api::tonConnectRequestStateRejected>();
+        }
+        return td_api::make_object<td_api::tonConnectRequestStatePending>(m->expire_date);
+      }();
+      return td_api::make_object<td_api::messageTonConnectRequest>(m->session_id, std::move(state), m->dapp_name,
+                                                                   m->topic, m->trace_id);
+    }
+    case MessageContentType::UnpaidMessagesAllowedByLink:
+      return td_api::make_object<td_api::messageUnpaidMessagesAllowedByLink>();
     default:
       UNREACHABLE();
       return nullptr;
@@ -13065,6 +13360,9 @@ string get_message_content_search_text(const Td *td, const MessageContent *conte
     case MessageContentType::PollDeleteAnswer:
     case MessageContentType::ChangeCommunity:
     case MessageContentType::ChatJoinedViaCommunity:
+    case MessageContentType::GramTransfer:
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
       return string();
     default:
       UNREACHABLE();
@@ -13647,6 +13945,7 @@ void add_message_content_dependencies(Dependencies &dependencies, const MessageC
     case MessageContentType::ManagedBotCreated: {
       const auto *content = static_cast<const MessageManagedBotCreated *>(message_content);
       dependencies.add(content->bot_user_id);
+      dependencies.add(my_user_id);
       break;
     }
     case MessageContentType::PollAppendAnswer:
@@ -13668,6 +13967,12 @@ void add_message_content_dependencies(Dependencies &dependencies, const MessageC
       dependencies.add(content->community_id);
       break;
     }
+    case MessageContentType::GramTransfer:
+      dependencies.add(my_user_id);
+      break;
+    case MessageContentType::WalletTonConnectRequest:
+    case MessageContentType::UnpaidMessagesAllowedByLink:
+      break;
     default:
       UNREACHABLE();
       break;
@@ -13740,20 +14045,7 @@ void move_message_content_sticker_set_to_top(Td *td, const MessageContent *conte
     return;
   }
 
-  vector<CustomEmojiId> custom_emoji_ids;
-  auto text = get_message_content_text(content);
-  if (text != nullptr) {
-    for (auto &entity : text->entities) {
-      if (entity.type == MessageEntity::Type::CustomEmoji) {
-        custom_emoji_ids.push_back(entity.custom_emoji_id);
-      }
-    }
-  } else {
-    const auto *rich_message = get_message_content_rich_message(content);
-    if (rich_message != nullptr) {
-      custom_emoji_ids = rich_message->get_custom_emoji_ids();
-    }
-  }
+  auto custom_emoji_ids = get_message_content_custom_emoji_ids(content);
   if (!custom_emoji_ids.empty()) {
     td->stickers_manager_->move_sticker_set_to_top_by_custom_emoji_ids(custom_emoji_ids);
   }
@@ -13765,7 +14057,7 @@ void on_dialog_used(TopDialogCategory category, DialogId dialog_id, int32 date) 
 
 void update_used_hashtags(Td *td, const MessageContent *content) {
   const FormattedText *text = get_message_content_text(content);
-  if (text == nullptr || text->text.empty()) {
+  if (text == nullptr || text->is_empty()) {
     const auto *rich_message = get_message_content_rich_message(content);
     if (rich_message != nullptr) {
       for (const auto &hashtag : rich_message->get_hashtags()) {

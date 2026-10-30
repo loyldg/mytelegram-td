@@ -106,6 +106,7 @@ class SuggestedActionManager;
 class TermsOfServiceManager;
 class ThemeManager;
 class TimeZoneManager;
+class TonWalletManager;
 class TopDialogManager;
 class TranscriptionManager;
 class TranslationManager;
@@ -117,6 +118,7 @@ class VoiceNotesManager;
 class WebAppManager;
 class WebBrowserManager;
 class WebPagesManager;
+class WebProxyManager;
 class WelcomeMessageManager;
 
 extern int VERBOSITY_NAME(td_init);
@@ -281,6 +283,8 @@ class Td final : public Actor {
   ActorOwn<ThemeManager> theme_manager_actor_;
   unique_ptr<TimeZoneManager> time_zone_manager_;
   ActorOwn<TimeZoneManager> time_zone_manager_actor_;
+  unique_ptr<TonWalletManager> ton_wallet_manager_;
+  ActorOwn<TonWalletManager> ton_wallet_manager_actor_;
   unique_ptr<TopDialogManager> top_dialog_manager_;
   ActorOwn<TopDialogManager> top_dialog_manager_actor_;
   unique_ptr<TranscriptionManager> transcription_manager_;
@@ -318,6 +322,7 @@ class Td final : public Actor {
   ActorOwn<SecureManager> secure_manager_;
   ActorOwn<StateManager> state_manager_;
   ActorOwn<StorageManager> storage_manager_;
+  ActorOwn<WebProxyManager> web_proxy_manager_;
 
   class ResultHandler : public std::enable_shared_from_this<ResultHandler> {
    public:
